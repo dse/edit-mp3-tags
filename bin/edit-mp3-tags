@@ -16,11 +16,26 @@ Getopt::Long::GetOptions(
     "h|help" => sub { usage(); exit(0); })
   or die("Type '$0 --help' for help.\n");
 
-my $editor = My::MP3::TagEditor->new();
-$editor->{verbose} = $verbose;
-$editor->{dry_run} = $dry_run;
-$editor->{album} = 1 if $album;
-$editor->run(@ARGV);
+sub usage { print(<<"END"); }
+usage:
+  edit-mp3-tags [OPTION ...] MP3FILE ...
+options:
+  -h, --help
+  -a, --album
+  -v, --verbose
+  -n, --dry-run
+END
+
+if (scalar(@ARGV)) {
+    my $editor = My::MP3::TagEditor->new();
+    $editor->{verbose} = $verbose;
+    $editor->{dry_run} = $dry_run;
+    $editor->{album} = 1 if $album;
+    $editor->run(@ARGV);
+} else {
+    warn("No files specified.  Exiting.");
+    exit(1);
+}
 
 package My::MP3::TagEditor;
 
