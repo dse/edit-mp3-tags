@@ -39,7 +39,7 @@ if (scalar(@ARGV)) {
 
 package My::MP3::TagEditor;
 
-use MP3::Info;
+use MP3::Tag;
 use File::Temp qw(tempfile);
 use Data::Dumper;
 use Text::ParseWords;
@@ -67,25 +67,25 @@ sub load_tags {
     my $first = 1;
     foreach my $filename (@filenames) {
         next unless $filename =~ m{\.mp3$}i;
-        my $tag = get_mp3tag($filename);
-        $tag ||= {};
+        my $mp3 = MP3::Tag->new($filename);
+        my ($title, $track, $artist, $album, $comment, $year, $genre) = $mp3->autoinfo();
         if ($self->{album}) {
             if ($first) {
-                printf $fh ("artist=%s\n", $tag->{ARTIST} // "");
-                printf $fh ("title=%s\n",  $tag->{TITLE}  // "");
-                printf $fh ("year=%s\n",   $tag->{YEAR}   // "");
+                printf $fh ("artist=%s\n", $artist // "");
+                printf $fh ("title=%s\n",  $title  // "");
+                printf $fh ("year=%s\n",   $year   // "");
             }
             printf $fh ("track=%-8s|title=%-32s|filename=%s\n",
-                        $tag->{TRACKNUM} // "",
-                        $tag->{TITLE}    // "",
+                        $track // "",
+                        $title // "",
                         $filename);
         } else {
             printf $fh ("track=%-8s|artist=%-32s|title=%-32s|album=%-32s|year=%-4s|filename=%s\n",
-                        $tag->{TRACKNUM} // "",
-                        $tag->{ARTIST}   // "",
-                        $tag->{TITLE}    // "",
-                        $tag->{ALBUM}    // "",
-                        $tag->{YEAR}     // "",
+                        $track  // "",
+                        $artist // "",
+                        $title  // "",
+                        $album  // "",
+                        $year   // "",
                         $filename);
         }
         $first = 0;
@@ -164,23 +164,21 @@ sub save_tags {
                 my $title  = $hash->{title};
                 my $album  = $hash->{album} // $defaults->{album};
                 my $year   = $hash->{year} // $defaults->{year};
-                print(Dumper($defaults));
-                my $tag = get_mp3tag($filename);
-                $tag->{TRACKNUM} = $track  if defined $track;
-                $tag->{ARTIST}   = $artist if defined $artist;
-                $tag->{TITLE}    = $title  if defined $title;
-                $tag->{ALBUM}    = $album  if defined $album;
-                $tag->{YEAR}     = $year   if defined $year;
+                my $mp3 = MP3::Tag->new($filename);
                 if ($self->{verbose} || $self->{dry_run}) {
                     printf("%s\n", $filename);
-                    printf("  TRACKNUM = %s\n", $tag->{TRACKNUM} // "");
-                    printf("  ARTIST   = %s\n", $tag->{ARTIST}   // "");
-                    printf("  TITLE    = %s\n", $tag->{TITLE}    // "");
-                    printf("  ALBUM    = %s\n", $tag->{ALBUM}    // "");
-                    printf("  YEAR     = %s\n", $tag->{YEAR}     // "");
+                    printf("  TRACKNUM = %s\n", $track  // "");
+                    printf("  ARTIST   = %s\n", $artist // "");
+                    printf("  TITLE    = %s\n", $title  // "");
+                    printf("  ALBUM    = %s\n", $album  // "");
+                    printf("  YEAR     = %s\n", $year   // "");
                 }
                 if (!$self->{dry_run}) {
-                    set_mp3tag($filename, $tag);
+                    $mp3->update_tags({ year   => $year   // "" });
+                    $mp3->update_tags({ track  => $track  // "" });
+                    $mp3->update_tags({ artist => $artist // "" });
+                    $mp3->update_tags({ album  => $album  // "" });
+                    $mp3->update_tags({ title  => $year   // "" });
                 }
             }
         }
