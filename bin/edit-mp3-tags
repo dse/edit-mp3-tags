@@ -174,11 +174,14 @@ sub save_tags {
                     printf("  YEAR     = %s\n", $year   // "");
                 }
                 if (!$self->{dry_run}) {
-                    $mp3->update_tags({ year   => $year   // "" });
-                    $mp3->update_tags({ track  => $track  // "" });
-                    $mp3->update_tags({ artist => $artist // "" });
-                    $mp3->update_tags({ album  => $album  // "" });
-                    $mp3->update_tags({ title  => $year   // "" });
+                    $mp3->update_tags({ year   => $year   // "" }, 1);
+                    $mp3->update_tags({ track  => $track  // "" }, 1);
+                    $mp3->update_tags({ artist => $artist // "" }, 1);
+                    $mp3->update_tags({ album  => $album  // "" }, 1);
+                    $mp3->update_tags({ title  => $year   // "" }, 1);
+                }
+                if ($self->{verbose} && !$self->{dry_run}) {
+                    print("Done.\n");
                 }
             }
         }
