@@ -1,0 +1,174 @@
+#!/usr/bin/env perl
+use warnings;
+use strict;
+
+use Getopt::Long;
+
+our $verbose;
+our $album;
+our $dry_run;
+
+Getopt::Long::Configure("bundling", "gnu_compat");
+Getopt::Long::GetOptions(
+    "v|verbose+" => \$verbose,
+    "n|dry-run" => \$dry_run,
+    "a|album" => \$album,
+    "h|help" => sub { usage(); exit(0); })
+  or die("Type '$0 --help' for help.\n");
+
+my $editor = My::MP3::TagEditor->new();
+$editor->{verbose} = $verbose;
+$editor->{dry_run} = $dry_run;
+$editor->{album} = 1 if $album;
+$editor->run(@ARGV);
+
+package My::MP3::TagEditor;
+
+use MP3::Info;
+use File::Temp qw(tempfile);
+use Data::Dumper;
+use Text::ParseWords;
+use Text::Trim;
+
+sub new {
+    my ($class) = @_;
+    my $self = bless({}, $class);
+    return $self;
+}
+
+sub run {
+    my ($self, @filenames) = @_;
+    $self->load_tags(@filenames);
+    $self->edit_tags();
+    if ($self->{edited}) {
+        $self->save_tags();
+    }
+}
+
+sub load_tags {
+    my ($self, @filenames) = @_;
+    my ($fh, $tempname) = tempfile();
+    $self->{tempname} = $tempname;
+    my $first = 1;
+    foreach my $filename (@filenames) {
+        next unless $filename =~ m{\.mp3$}i;
+        my $tag = get_mp3tag($filename);
+        $tag ||= {};
+        if ($self->{album}) {
+            if ($first) {
+                printf $fh ("artist=%s\n", $tag->{ARTIST} // "");
+                printf $fh ("title=%s\n",  $tag->{TITLE}  // "");
+                printf $fh ("year=%s\n",   $tag->{YEAR}   // "");
+            }
+            printf $fh ("track=%-8s|title=%-32s|filename=%s\n",
+                        $tag->{TRACKNUM} // "",
+                        $tag->{TITLE}    // "",
+                        $filename);
+        } else {
+            printf $fh ("track=%-8s|artist=%-32s|title=%-32s|album=%-32s|year=%-4s|filename=%s\n",
+                        $tag->{TRACKNUM} // "",
+                        $tag->{ARTIST}   // "",
+                        $tag->{TITLE}    // "",
+                        $tag->{ALBUM}    // "",
+                        $tag->{YEAR}     // "",
+                        $filename);
+        }
+        $first = 0;
+    }
+    $self->{tempname_mtime} = (stat($tempname))[9];
+}
+
+sub edit_tags {
+    my ($self) = @_;
+    my $editor = $ENV{VISUAL} // $ENV{EDITOR};
+    my @editor = shellwords($editor);
+    my $result = system(@editor, $self->{tempname});
+    my $mtime = (stat($self->{tempname}))[9];
+    $self->{edited} = 0;
+    if ($result) {
+        $self->editor_failed();
+    } elsif ($mtime == $self->{tempname_mtime}) {
+        $self->not_modified();
+    } else {
+        $self->{edited} = 1;
+    }
+}
+
+sub editor_failed {
+    my ($self) = @_;
+    warn("Editor failed.  Exiting.\n");
+    unlink($self->{tempname});
+    exit(1);
+}
+
+sub not_modified {
+    my ($self) = @_;
+    warn("Not modified.  Exiting.\n");
+    unlink($self->{tempname});
+    exit(0);
+}
+
+sub save_tags {
+    my ($self) = @_;
+    my $tempname = $self->{tempname};
+    my $fh;
+    open($fh, "<", $tempname) or die("Cannot read $tempname: $!\n");
+    my $defaults = {};
+    while (<$fh>) {
+        next if /^\s*#/;        # ignore comments
+        chomp();
+        my @kv = split(/\|/, $_);
+        if (scalar(@kv) == 1) {
+            my $kv = $kv[0];
+            warn("defaults $kv\n");
+            if ($kv =~ /\s*=\s*/) {
+                my ($key, $value) = ($`, $');
+                $key = trim($key);
+                $value = trim($value);
+                $defaults->{$key} = $value;
+            }
+        } else {
+            my $hash = {};
+            my $filename;
+            foreach my $kv (@kv) {
+                if ($kv =~ /\s*=\s*/) {
+                    my ($key, $value) = ($`, $');
+                    $key = trim($key);
+                    $value = trim($value);
+                    $value = undef if $value eq "";
+                    if ($key eq "filename") {
+                        $filename = $value;
+                    } elsif (defined $value) {
+                        $hash->{$key} = $value;
+                    }
+                }
+            }
+            if (defined $filename) {
+                my $track  = $hash->{track};
+                my $artist = $hash->{artist} // $defaults->{artist};
+                my $title  = $hash->{title};
+                my $album  = $hash->{album} // $defaults->{album};
+                my $year   = $hash->{year} // $defaults->{year};
+                print(Dumper($defaults));
+                my $tag = get_mp3tag($filename);
+                $tag->{TRACKNUM} = $track  if defined $track;
+                $tag->{ARTIST}   = $artist if defined $artist;
+                $tag->{TITLE}    = $title  if defined $title;
+                $tag->{ALBUM}    = $album  if defined $album;
+                $tag->{YEAR}     = $year   if defined $year;
+                if ($self->{verbose} || $self->{dry_run}) {
+                    printf("%s\n", $filename);
+                    printf("  TRACKNUM = %s\n", $tag->{TRACKNUM} // "");
+                    printf("  ARTIST   = %s\n", $tag->{ARTIST}   // "");
+                    printf("  TITLE    = %s\n", $tag->{TITLE}    // "");
+                    printf("  ALBUM    = %s\n", $tag->{ALBUM}    // "");
+                    printf("  YEAR     = %s\n", $tag->{YEAR}     // "");
+                }
+                if (!$self->{dry_run}) {
+                    set_mp3tag($filename, $tag);
+                }
+            }
+        }
+    }
+}
+
