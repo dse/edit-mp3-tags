@@ -44,6 +44,7 @@ use File::Temp qw(tempfile);
 use Data::Dumper;
 use Text::ParseWords;
 use Text::Trim;
+use File::Which;
 
 sub new {
     my ($class) = @_;
@@ -95,7 +96,13 @@ sub load_tags {
 
 sub edit_tags {
     my ($self) = @_;
-    my $editor = $ENV{VISUAL} // $ENV{EDITOR};
+    my $editor = $ENV{VISUAL} // $ENV{EDITOR} //
+      which('nano') // which('pico') // which('vi');
+    if (!$editor) {
+        die("Can't figure out what editor you want to use.\n".
+              "You don't have VISUAL or EDITOR specified and\n".
+              "you don't have nano, pico, or vi.\n");
+    }
     my @editor = shellwords($editor);
     my $result = system(@editor, $self->{tempname});
     my $mtime = (stat($self->{tempname}))[9];
