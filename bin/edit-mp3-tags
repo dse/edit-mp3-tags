@@ -2,6 +2,9 @@
 use warnings;
 use strict;
 
+# use open IO => ":locale";
+use open IO => ":encoding(UTF-8)";
+
 use Getopt::Long;
 
 our $verbose;
@@ -69,6 +72,11 @@ package My::MP3::TagEditor {
         }
     }
 
+    INIT {
+        MP3::Tag->config("prohibit_v24" => 0);
+        MP3::Tag->config("write_v24" => 1);
+    }
+    
     sub load_tags {
         my ($self, @filenames) = @_;
         my ($fh, $tempname) = tempfile();
