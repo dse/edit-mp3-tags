@@ -77,18 +77,18 @@ package My::MP3::TagEditor {
         MP3::Tag->config("write_v24" => 1);
     }
 
-    our $RX_INTEGER_INTEGER;
+    our $RX_INTEGER_OF_INTEGER;
     our $RX_INTEGER;
     BEGIN {
-        $RX_INTEGER_INTEGER = qr{(?: \s* (\d+) \s* (?:/|of) \s* (\d+) \s* )}xi;
-        $RX_INTEGER         = qr{(?: \s* (\d+) \s*                        )}xi;
+        $RX_INTEGER_OF_INTEGER = qr{(?: \s* (\d+) \s* (?:/|of) \s* (\d+) \s* )}xi;
+        $RX_INTEGER            = qr{(?: \s* (\d+) \s*                        )}xi;
     }
 
     sub fix_track_numbers {
         my ($self, $track_array) = @_;
         foreach my $track_hash (@{$track_array}) {
             my $track = $track_hash->{track};
-            if ($track =~ m{^ $RX_INTEGER_INTEGER $}x) {
+            if ($track =~ m{^ $RX_INTEGER_OF_INTEGER $}x) {
                 $track_hash->{track_no} = $1 + 0;
                 $track_hash->{track_of} = $2 + 0;
             } elsif ($track =~ m{^ $RX_INTEGER $}x) {
@@ -122,7 +122,7 @@ package My::MP3::TagEditor {
         my ($self, $track_array) = @_;
         foreach my $track_hash (@{$track_array}) {
             if (defined $track_hash->{tpos}) {
-                if ($track_hash->{tpos} =~ m{^ $RX_INTEGER_INTEGER $}x) {
+                if ($track_hash->{tpos} =~ m{^ $RX_INTEGER_OF_INTEGER $}x) {
                     my $new = sprintf("%d/%d", $1 + 0, $2 + 0);
                     if ($new ne $track_hash->{tpos}) {
                         $track_hash->{tpos} = $new;
@@ -310,10 +310,10 @@ package My::MP3::TagEditor {
             }
             my $track_hash = {};
 
-            if (s{^ ($RX_INTEGER_INTEGER|$RX_INTEGER) \: \s* }{}x) {
+            if (s{^ ($RX_INTEGER_OF_INTEGER|$RX_INTEGER) \: \s* }{}x) {
                 $track_hash->{tpos} = $1;
             }
-            if (s{^ ($RX_INTEGER_INTEGER|$RX_INTEGER) \. \s* }{}x) {
+            if (s{^ ($RX_INTEGER_OF_INTEGER|$RX_INTEGER) \. \s* }{}x) {
                 $track_hash->{track} = $1;
             }
 
