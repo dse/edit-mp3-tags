@@ -77,14 +77,21 @@ package My::MP3::TagEditor {
         MP3::Tag->config("write_v24" => 1);
     }
 
+    our $RX_INTEGER_INTEGER;
+    our $RX_INTEGER;
+    BEGIN {
+        $RX_INTEGER_INTEGER = qr{(?: \s* (\d+) \s* (?:/|of) \s* (\d+) \s* )}xi;
+        $RX_INTEGER         = qr{(?: \s* (\d+) \s*                        )}xi;
+    }
+
     sub fix_track_numbers {
         my ($self, $track_array) = @_;
         foreach my $track_hash (@{$track_array}) {
             my $track = $track_hash->{track};
-            if ($track =~ m{^\s*(\d+)\s*(?:of|/)\s*(\d+)\s*$}i) {
+            if ($track =~ m{^ $RX_INTEGER_INTEGER $}x) {
                 $track_hash->{track_no} = $1 + 0;
                 $track_hash->{track_of} = $2 + 0;
-            } elsif ($track =~ m{^\s*(\d+)\s*$}i) {
+            } elsif ($track =~ m{^ $RX_INTEGER $}x) {
                 $track_hash->{track_no} = $1 + 0;
                 $track_hash->{track_of} = undef;
             }
@@ -102,11 +109,40 @@ package My::MP3::TagEditor {
                 $self->{modified} = 1;
             }
         }
+
+        # so arrays can be compared
+        foreach my $track_hash (@{$track_array}) {
+            delete $track_hash->{track_no};
+            delete $track_hash->{track_of};
+            delete $track_hash->{old_track};
+        }
+    }
+
+    sub fix_tpos {
+        my ($self, $track_array) = @_;
+        foreach my $track_hash (@{$track_array}) {
+            if (defined $track_hash->{tpos}) {
+                if ($track_hash->{tpos} =~ m{^ $RX_INTEGER_INTEGER $}x) {
+                    my $new = sprintf("%d/%d", $1 + 0, $2 + 0);
+                    if ($new ne $track_hash->{tpos}) {
+                        $track_hash->{tpos} = $new;
+                        $self->{modified} = 1;
+                    }
+                } elsif ($track_hash->{tpos} =~ m{^ $RX_INTEGER $}x) {
+                    my $new = $1 + 0;
+                    if ($new ne $track_hash->{tpos}) {
+                        $track_hash->{tpos} = $new;
+                        $self->{modified} = 1;
+                    }
+                }
+            }
+        }
     }
 
     sub load_tags_from_files {
         my ($self, @filenames) = @_;
         $self->{tracks} = [];
+        $self->{tracks_by_filename} = {};
         foreach my $filename (@filenames) {
             next unless $filename =~ m{\.mp3$}i;
 
@@ -117,26 +153,9 @@ package My::MP3::TagEditor {
             }
 
             my ($title, $track, $artist, $album, $comment, $year, $genre) = $mp3->autoinfo();
-            my $album_artist = $mp3->select_id3v2_frame_by_descr("TPE2"); #"Band/orchestra/accompaniment"
+            my $album_artist = $mp3->select_id3v2_frame_by_descr("TPE2"); # "Band/orchestra/accompaniment"
             my $tcmp         = $mp3->select_id3v2_frame_by_descr("TCMP"); # iTunes Compilation Flag
-
-            if ($track =~ m{^\s*(\d+)\s*(?:of|/)\s*(\d+)\s*$}) {
-                my $track_num    = $1;
-                my $track_num_of = $2;
-                my $new_track_num    = $track_num + 0;
-                my $new_track_num_of = $track_num_of + 0;
-                my $new_track = "${new_track_num}/${new_track_num_of}";
-                if ($new_track ne $track) {
-                    $track = $new_track;
-                    $self->{modified} = 1;
-                }
-            } else {
-                my $new_track = $track + 0; # "01234" => 1234
-                if ($new_track ne $track) {
-                    $track = $new_track;
-                    $self->{modified} = 1;
-                }
-            }
+            my $tpos         = $mp3->select_id3v2_frame_by_descr("TPOS"); # part of set (e.g., disc 1/2)
 
             my $track_hash = {
                 title        => $title,
@@ -149,6 +168,7 @@ package My::MP3::TagEditor {
                 album_artist => $album_artist,
                 tcmp         => $tcmp,
                 filename     => $filename,
+                tpos         => $tpos,
             };
 
             if ($self->{parse_filenames}) {
@@ -171,7 +191,9 @@ package My::MP3::TagEditor {
                     }
                 }
             }
+
             push(@{$self->{tracks}}, $track_hash);
+            $self->{tracks_by_filename}->{$filename} = $track_hash;
         }
     }
 
@@ -191,8 +213,10 @@ package My::MP3::TagEditor {
             print $fh "# Blank out this file to cancel all changes.\n";
             print $fh "\n";
             my $column_width = 32;
+            my $show_tpos = grep { defined $_->{tpos} && $_->{tpos} =~ m{\S} } @{$self->{tracks}};
             foreach my $track (@{$self->{tracks}}) {
-                printf $fh ("%8s. ",              $track->{track});
+                printf $fh ("%7s: ",              $track->{tpos}) if $show_tpos;
+                printf $fh ("%7s. ",              $track->{track});
                 printf $fh ("artist=%-*s",        $column_width, $track->{artist});
                 printf $fh ("|title=%-*s",        $column_width, $track->{title});
                 printf $fh ("|album=%-*s",        $column_width, $track->{album});
@@ -257,6 +281,7 @@ package My::MP3::TagEditor {
         my $last_line_album = 0;
         my $last_line_track = 0;
         $self->{edited_tracks} = [];
+        $self->{edited_tracks_by_filename} = {};
         local $. = 0;
         while (<$fh>) {
             next if m{^\s*\#};  # ignore comments;
@@ -283,16 +308,15 @@ package My::MP3::TagEditor {
                 $last_line_track = 1;
                 next;
             }
-            my $track_hash = {
-            };
-            if (s{^\s*(\d+)(?:\s*(?:/|of)\s*(\d+))?\s*\.\s*}{}i) {
-                my ($track_number, $track_number_of) = ($1, $2);
-                if (defined $track_number_of) {
-                    $track_hash->{track} = sprintf("%s/%s", $track_number, $track_number_of);
-                } else {
-                    $track_hash->{track} = $track_number;
-                }
+            my $track_hash = {};
+
+            if (s{^ ($RX_INTEGER_INTEGER|$RX_INTEGER) \: \s* }{}x) {
+                $track_hash->{tpos} = $1;
             }
+            if (s{^ ($RX_INTEGER_INTEGER|$RX_INTEGER) \. \s* }{}x) {
+                $track_hash->{track} = $1;
+            }
+
             my @kv = split(/\|/, $_);
             foreach (@kv) {
                 s{^\s+}{};
@@ -305,6 +329,7 @@ package My::MP3::TagEditor {
                 }
             }
             push(@{$self->{edited_tracks}}, $track_hash);
+            $self->{edited_tracks_by_filename}->{$track_hash->{filename}} = $track_hash;
             if ($self->{verbose} >= 3) {
                 warn Dumper($track_hash);
             }
@@ -326,6 +351,7 @@ package My::MP3::TagEditor {
             my $title    = $track_hash->{title};
             my $year     = $self->{album}->{year}   // $track_hash->{year};
             my $album    = $self->{album}->{album}  // $track_hash->{album};
+            my $tpos     = $track_hash->{tpos};
 
             my $album_artist;
             if ($self->{album}->{variousartists}) {
@@ -340,6 +366,7 @@ package My::MP3::TagEditor {
             }
             if ($self->{verbose} >= 2 || ($self->{dry_run} && $self->{verbose})) {
                 printf("%s\n", $filename);
+                printf("  TPOS (DISC)  = %s\n", $tpos         // "");
                 printf("  TRACK        = %s\n", $track        // "");
                 printf("  ARTIST       = %s\n", $artist       // "");
                 printf("  TITLE        = %s\n", $title        // "");
@@ -353,6 +380,7 @@ package My::MP3::TagEditor {
                 $mp3->year_set($year // "", 1);
                 $mp3->album_set($album // "", 1);
                 $mp3->track_set($track // "", 1);
+                $mp3->select_id3v2_frame_by_descr("TPOS", $tpos // "");
                 if ($self->{album}->{variousartists}) {
                     $mp3->select_id3v2_frame_by_descr("TPE2", $album_artist);
                     $mp3->select_id3v2_frame_by_descr("TCMP", "1");
