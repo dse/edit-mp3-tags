@@ -176,8 +176,11 @@ package My::MP3::TagEditor {
                 performer    => $performer,
             };
 
-            foreach my $key (keys %$track_hash) {
-                delete $track_hash->{$key} if $track_hash->{$key} !~ m{\S};
+            my @keys = keys %$track_hash;
+            foreach my $key (@keys) {
+                if (is_blank($track_hash->{$key})) {
+                    delete $track_hash->{$key};
+                }
             }
 
             if ($self->{parse_filenames}) {
@@ -189,17 +192,17 @@ package My::MP3::TagEditor {
                                    (?:\.mp3)?
                                    $}xi) {
                     my ($new_track, $new_artist, $new_title) = ($1, $2, $3);
-                    if (defined $new_track && $new_track =~ m{\S}) {
+                    if (!is_blank($new_track)) {
                         $track_hash->{track} = $new_track;
                         $track_hash->{modified} = 1;
                         $self->{modified} = 1;
                     }
-                    if (defined $new_artist && $new_artist =~ m{\S}) {
+                    if (!is_blank($new_artist)) {
                         $track_hash->{artist} = $new_artist;
                         $track_hash->{modified} = 1;
                         $self->{modified} = 1;
                     }
-                    if (defined $new_title && $new_title =~ m{\S}) {
+                    if (!is_blank($new_title)) {
                         $track_hash->{title} = $new_title;
                         $track_hash->{modified} = 1;
                         $self->{modified} = 1;
@@ -236,7 +239,7 @@ package My::MP3::TagEditor {
 
 EOF
             my $column_width = 32;
-            my $show_tpos = grep { defined $_->{tpos} && $_->{tpos} =~ m{\S} } @{$self->{tracks}};
+            my $show_tpos = grep { !is_blank($_->{tpos}) } @{$self->{tracks}};
             foreach my $track (@{$self->{tracks}}) {
                 printf $fh ("%7s: ",              $track->{tpos} // "") if $show_tpos;
                 printf $fh ("%7s. ",              $track->{track} // "");
@@ -321,7 +324,7 @@ EOF
                     my ($key, $value) = ($`, $');
                     $key =~ s{-+}{_}g;
                     warn("album hash: $key = $value\n");
-                    if ($value !~ m{\S}) {
+                    if (is_blank($value)) {
                         delete $self->{album}->{$key};
                     } else {
                         $self->{album}->{$key} = $value;
@@ -350,7 +353,7 @@ EOF
                 s{\s+$}{};
                 if (m{\s*=\s*}) {
                     my ($key, $value) = ($`, $');
-                    if ($value !~ m{\S}) {
+                    if (is_blank($value)) {
                         delete $track_hash->{$key};
                     } else {
                         $track_hash->{$key} = $value;
@@ -372,7 +375,7 @@ EOF
 
         foreach my $track_hash (@{$self->{edited_tracks}}) {
             my $filename = $track_hash->{filename};
-            if (!defined $filename || $filename !~ m{\S}) {
+            if (is_blank($filename)) {
                 warn("No filename on $filename line $.\n");
                 next;
             }
@@ -428,5 +431,12 @@ EOF
                 print("Done.\n");
             }
         }
+    }
+
+    sub is_blank {
+        my ($string) = @_;
+        return 1 if !defined $string;
+        return 1 if $string !~ m{\S};
+        return 0;
     }
 };
