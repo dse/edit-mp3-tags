@@ -112,9 +112,9 @@ package My::MP3::TagEditor {
 
         # so arrays can be compared
         foreach my $track_hash (@{$track_array}) {
-            delete $track_hash->{track_no};
-            delete $track_hash->{track_of};
-            delete $track_hash->{old_track};
+            # delete $track_hash->{track_no};
+            # delete $track_hash->{track_of};
+            # delete $track_hash->{old_track};
         }
     }
 
@@ -156,23 +156,38 @@ package My::MP3::TagEditor {
             my $album_artist = $mp3->select_id3v2_frame_by_descr("TPE2"); # "Band/orchestra/accompaniment"
             my $tcmp         = $mp3->select_id3v2_frame_by_descr("TCMP"); # iTunes Compilation Flag
             my $tpos         = $mp3->select_id3v2_frame_by_descr("TPOS"); # part of set (e.g., disc 1/2)
+            my $composer     = $mp3->composer();
+            my $performer    = $mp3->performer();
 
             my $track_hash = {
-                title        => $title,
                 track        => $track,
                 artist       => $artist,
+                title        => $title,
                 album        => $album,
-                comment      => $comment,
                 year         => $year,
+                tpos         => $tpos,
+
                 genre        => $genre,
                 album_artist => $album_artist,
                 tcmp         => $tcmp,
                 filename     => $filename,
-                tpos         => $tpos,
+                comment      => $comment,
+                composer     => $composer,
+                performer    => $performer,
             };
 
+            foreach my $key (keys %$track_hash) {
+                delete $track_hash->{$key} if $track_hash->{$key} !~ m{\S};
+            }
+
             if ($self->{parse_filenames}) {
-                if ($filename =~ m{^(?:(\d+)(?:\s*-+\s*|\s*\.\s*))?(.*?)(?:\s*-+\s*)(.*?)(?:\.mp3)?$}xi) {
+                if ($filename =~ m{^
+                                   (?:(\d+)(?:\s*-+\s*|\s*\.\s*|\s+))?
+                                   (.*?)
+                                   (?:\s*-+\s*)
+                                   (.*?)
+                                   (?:\.mp3)?
+                                   $}xi) {
                     my ($new_track, $new_artist, $new_title) = ($1, $2, $3);
                     if (defined $new_track && $new_track =~ m{\S}) {
                         $track_hash->{track} = $new_track;
@@ -202,25 +217,33 @@ package My::MP3::TagEditor {
         if (scalar @{$self->{tracks}}) {
             my ($fh, $tempname) = tempfile();
             $self->{tempname} = $tempname;
-            print $fh "# Lines starting with '#' are ignored.\n";
-            print $fh "# Un-comment the following line for various-artists compilations.\n";
-            print $fh "#various-artists\n";
-            print $fh "# Un-comment any of the following line(s) for albums.\n";
-            print $fh "#artist=<artist>\n";
-            print $fh "#album=<album>\n";
-            print $fh "#year=<year>\n";
-            print $fh "# Make changes, save, and exit your editor to effect your changes.\n";
-            print $fh "# Blank out this file to cancel all changes.\n";
-            print $fh "\n";
+            print $fh <<"EOF";
+# Lines starting with '#' are ignored.
+
+# Un-comment the following line for various-artists compilations.
+#various-artists
+
+# Un-comment and edit any of the following line(s) for albums.
+#artist=<artist>
+#album=<album>
+#year=<year>
+
+# For multi-disc sets, prefix each line with:       1/2:   (optional)
+# Then if you need to fix track numbers manually:   1/10.
+
+# Make changes, save, and exit your editor to effect your changes.
+# Blank out this file to cancel all changes.
+
+EOF
             my $column_width = 32;
             my $show_tpos = grep { defined $_->{tpos} && $_->{tpos} =~ m{\S} } @{$self->{tracks}};
             foreach my $track (@{$self->{tracks}}) {
-                printf $fh ("%7s: ",              $track->{tpos}) if $show_tpos;
-                printf $fh ("%7s. ",              $track->{track});
-                printf $fh ("artist=%-*s",        $column_width, $track->{artist});
-                printf $fh ("|title=%-*s",        $column_width, $track->{title});
-                printf $fh ("|album=%-*s",        $column_width, $track->{album});
-                printf $fh ("|year=%-*s",         $column_width, $track->{year});
+                printf $fh ("%7s: ",              $track->{tpos} // "") if $show_tpos;
+                printf $fh ("%7s. ",              $track->{track} // "");
+                printf $fh ("artist=%-*s",        $column_width, $track->{artist} // "");
+                printf $fh ("|title=%-*s",        $column_width, $track->{title} // "");
+                printf $fh ("|album=%-*s",        $column_width, $track->{album} // "");
+                printf $fh ("|year=%-*s",         $column_width, $track->{year} // "");
                 printf $fh ("|album-artist=%-*s", $column_width, $track->{album_artist} // "");
                 printf $fh ("|filename=%s",       $track->{filename} // "");
                 print  $fh "\n";
@@ -298,7 +321,11 @@ package My::MP3::TagEditor {
                     my ($key, $value) = ($`, $');
                     $key =~ s{-+}{_}g;
                     warn("album hash: $key = $value\n");
-                    $self->{album}->{$key} = $value;
+                    if ($value !~ m{\S}) {
+                        delete $self->{album}->{$key};
+                    } else {
+                        $self->{album}->{$key} = $value;
+                    }
                 } else {
                     s{-+}{_}g;
                     warn("album hash: $_ = 1\n");
@@ -323,7 +350,11 @@ package My::MP3::TagEditor {
                 s{\s+$}{};
                 if (m{\s*=\s*}) {
                     my ($key, $value) = ($`, $');
-                    $track_hash->{$key} = $value;
+                    if ($value !~ m{\S}) {
+                        delete $track_hash->{$key};
+                    } else {
+                        $track_hash->{$key} = $value;
+                    }
                 } else {
                     $track_hash->{$_} = 1;
                 }
@@ -349,12 +380,12 @@ package My::MP3::TagEditor {
             my $track    = $track_hash->{track};
             my $artist   = $self->{album}->{artist} // $track_hash->{artist};
             my $title    = $track_hash->{title};
-            my $year     = $self->{album}->{year}   // $track_hash->{year};
             my $album    = $self->{album}->{album}  // $track_hash->{album};
+            my $year     = $self->{album}->{year}   // $track_hash->{year};
             my $tpos     = $track_hash->{tpos};
 
             my $album_artist;
-            if ($self->{album}->{variousartists}) {
+            if ($self->{album}->{various_artists}) {
                 $album_artist = $artist;
                 $artist = "Various Artists";
             }
@@ -366,12 +397,12 @@ package My::MP3::TagEditor {
             }
             if ($self->{verbose} >= 2 || ($self->{dry_run} && $self->{verbose})) {
                 printf("%s\n", $filename);
-                printf("  TPOS (DISC)  = %s\n", $tpos         // "");
                 printf("  TRACK        = %s\n", $track        // "");
                 printf("  ARTIST       = %s\n", $artist       // "");
                 printf("  TITLE        = %s\n", $title        // "");
                 printf("  ALBUM        = %s\n", $album        // "");
                 printf("  YEAR         = %s\n", $year         // "");
+                printf("  TPOS (DISC)  = %s\n", $tpos         // "");
                 printf("  ALBUM_ARTIST = %s\n", $album_artist // "");
             }
             if (!$self->{dry_run}) {
@@ -381,7 +412,7 @@ package My::MP3::TagEditor {
                 $mp3->album_set($album // "", 1);
                 $mp3->track_set($track // "", 1);
                 $mp3->select_id3v2_frame_by_descr("TPOS", $tpos // "");
-                if ($self->{album}->{variousartists}) {
+                if ($self->{album}->{various_artists}) {
                     $mp3->select_id3v2_frame_by_descr("TPE2", $album_artist);
                     $mp3->select_id3v2_frame_by_descr("TCMP", "1");
                 } else {
@@ -391,7 +422,7 @@ package My::MP3::TagEditor {
                 if ($self->{verbose}) {
                     warn("Updating tags on $filename\n");
                 }
-                $mp3->update_tags();
+                $mp3->update_tags(undef, 1);
             }
             if ($self->{verbose} && !$self->{dry_run}) {
                 print("Done.\n");
