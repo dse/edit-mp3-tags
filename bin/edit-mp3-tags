@@ -52,6 +52,7 @@ package My::MP3::TagEditor {
     use Text::ParseWords;
     use Text::Trim;
     use File::Which;
+    use List::Util qw(max);
 
     sub new {
         my ($class) = @_;
@@ -238,16 +239,26 @@ package My::MP3::TagEditor {
 # Blank out this file to cancel all changes.
 
 EOF
-            my $column_width = 32;
             my $show_tpos = grep { !is_blank($_->{tpos}) } @{$self->{tracks}};
+            my %column_widths = ();
+            foreach my $column (qw(artist title album year album_artist)) {
+                my @lengths = map { length($_) } grep { defined $_ } map { $_->{$column} } @{$self->{tracks}};
+                if (scalar @lengths) {
+                    $column_widths{$column} = max @lengths;
+                } else {
+                    $column_widths{$column} = 0;
+                }
+            }
+            my $extra_space = 2;
+
             foreach my $track (@{$self->{tracks}}) {
                 printf $fh ("%7s: ",              $track->{tpos} // "") if $show_tpos;
                 printf $fh ("%7s. ",              $track->{track} // "");
-                printf $fh ("artist=%-*s",        $column_width, $track->{artist} // "");
-                printf $fh ("|title=%-*s",        $column_width, $track->{title} // "");
-                printf $fh ("|album=%-*s",        $column_width, $track->{album} // "");
-                printf $fh ("|year=%-*s",         $column_width, $track->{year} // "");
-                printf $fh ("|album-artist=%-*s", $column_width, $track->{album_artist} // "");
+                printf $fh ("artist=%-*s",        $extra_space + $column_widths{artist},       $track->{artist}       // "");
+                printf $fh ("|title=%-*s",        $extra_space + $column_widths{title},        $track->{title}        // "");
+                printf $fh ("|album=%-*s",        $extra_space + $column_widths{album},        $track->{album}        // "");
+                printf $fh ("|year=%-*s",         $extra_space + $column_widths{year},         $track->{year}         // "");
+                printf $fh ("|album-artist=%-*s", $extra_space + $column_widths{album_artist}, $track->{album_artist} // "");
                 printf $fh ("|filename=%s",       $track->{filename} // "");
                 print  $fh "\n";
             }
