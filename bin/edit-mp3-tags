@@ -327,7 +327,6 @@ EOF
 
             if (!m{\|}) {
                 if (!$last_line_album) {
-                    warn("album hash: emptying.\n");
                     $self->{album} = {};
                 }
                 s{^\s+}{};
@@ -335,7 +334,6 @@ EOF
                 if (m{\s*=\s*}) {
                     my ($key, $value) = ($`, $');
                     $key =~ s{-+}{_}g;
-                    warn("album hash: $key = $value\n");
                     if (is_blank($value)) {
                         delete $self->{album}->{$key};
                     } else {
@@ -343,7 +341,6 @@ EOF
                     }
                 } else {
                     s{-+}{_}g;
-                    warn("album hash: $_ = 1\n");
                     $self->{album}->{$_} = 1;
                 }
                 $last_line_album = 1;
