@@ -313,6 +313,7 @@ EOF
             next if m{^\s*\#};  # ignore comments;
             s{\R\z}{};          # safer chomp
             next unless m{\S};  # skip blank lines
+
             if (!m{\|}) {
                 if (!$last_line_album) {
                     warn("album hash: emptying.\n");
@@ -334,8 +335,8 @@ EOF
                     warn("album hash: $_ = 1\n");
                     $self->{album}->{$_} = 1;
                 }
-                $last_line_album = 0;
-                $last_line_track = 1;
+                $last_line_album = 1;
+                $last_line_track = 0;
                 next;
             }
             my $track_hash = {};
@@ -367,6 +368,9 @@ EOF
             if ($self->{verbose} >= 3) {
                 warn Dumper($track_hash);
             }
+
+            $last_line_album = 0;
+            $last_line_track = 1;
         }
     }
 
@@ -419,7 +423,7 @@ EOF
                     $mp3->select_id3v2_frame_by_descr("TPE2", $album_artist);
                     $mp3->select_id3v2_frame_by_descr("TCMP", "1");
                 } else {
-                    $mp3->select_id3v2_frame_by_descr("TPE2", undef);
+                    $mp3->select_id3v2_frame_by_descr("TPE2", ''); # not undef
                     $mp3->select_id3v2_frame_by_descr("TCMP", undef);
                 }
                 if ($self->{verbose}) {
