@@ -14,28 +14,28 @@ use List::Util qw(max);
 use Moo;
 
 has album                     => (is => 'rw');
-has dry_run                   => (is => 'rw', default => 0);
-has edited_tracks_by_filename => (is => 'rw', default => sub { return {}; });
-has edited_tracks             => (is => 'rw', default => sub { return []; });
+has dryRun                   => (is => 'rw', default => 0);
+has editedTracksByFilename => (is => 'rw', default => sub { return {}; });
+has editedTracks             => (is => 'rw', default => sub { return []; });
 has force                     => (is => 'rw', default => 0);
 has modified                  => (is => 'rw', default => 0);
-has parse_filenames           => (is => 'rw', default => 0);
-has tempname_mtime            => (is => 'rw');
+has parseFilenames           => (is => 'rw', default => 0);
+has tempnameMtime            => (is => 'rw');
 has tempname                  => (is => 'rw');
-has tracks_by_filename        => (is => 'rw', default => sub { return {}; });
+has tracksByFilename        => (is => 'rw', default => sub { return {}; });
 has tracks                    => (is => 'rw', default => sub { return []; });
 has verbose                   => (is => 'rw', default => 0);
 
 sub run {
     my ($self, @filenames) = @_;
-    $self->load_tags_from_files(@filenames);
-    $self->fix_track_numbers($self->tracks);
-    $self->create_tags_file_to_edit();
-    $self->edit_tags_file();
-    $self->load_tags_from_tags_file();
-    $self->fix_track_numbers($self->edited_tracks);
-    if ($self->modified || $self->dry_run || $self->force) {
-        $self->save_tags();
+    $self->loadTagsFromFiles(@filenames);
+    $self->fixTrackNumbers($self->tracks);
+    $self->createTagsFileToEdit();
+    $self->editTagsFile();
+    $self->loadTagsFromTagsFile();
+    $self->fixTrackNumbers($self->editedTracks);
+    if ($self->modified || $self->dryRun || $self->force) {
+        $self->saveTags();
     }
 }
 
@@ -46,54 +46,54 @@ BEGIN {
     $RX_INTEGER            = qr{(?: \s* (\d+) \s*                        )}xi;
 }
 
-sub fix_track_numbers {
-    my ($self, $track_array) = @_;
-    foreach my $track_hash (@{$track_array}) {
-        my $track = $track_hash->{track};
+sub fixTrackNumbers {
+    my ($self, $trackArray) = @_;
+    foreach my $trackHash (@{$trackArray}) {
+        my $track = $trackHash->{track};
         if ($track =~ m{^ $RX_INTEGER_OF_INTEGER $}x) {
-            $track_hash->{track_no} = $1 + 0;
-            $track_hash->{track_of} = $2 + 0;
+            $trackHash->{trackNo} = $1 + 0;
+            $trackHash->{trackOf} = $2 + 0;
         } elsif ($track =~ m{^ $RX_INTEGER $}x) {
-            $track_hash->{track_no} = $1 + 0;
-            $track_hash->{track_of} = undef;
+            $trackHash->{trackNo} = $1 + 0;
+            $trackHash->{trackOf} = undef;
         }
     }
-    my $sorted_track_numbers = join(",", sort { $a <=> $b } map { $_->{track_no} // 0 } @{$track_array});
-    my $check_track_numbers  = join(",", 1 .. scalar(@{$track_array}));
-    if ($sorted_track_numbers eq $check_track_numbers) {
-        @{$track_array} = sort { $a->{track_no} <=> $b->{track_no} } @{$track_array};
-        foreach my $track_hash (@{$track_array}) {
-            $track_hash->{track_of} = scalar(@{$track_array});
-            $track_hash->{old_track} = $track_hash->{track};
-            $track_hash->{track} = sprintf("%d/%d", $track_hash->{track_no}, $track_hash->{track_of});
+    my $sortedTrackNumbers = join(",", sort { $a <=> $b } map { $_->{trackNo} // 0 } @{$trackArray});
+    my $checkTrackNumbers  = join(",", 1 .. scalar(@{$trackArray}));
+    if ($sortedTrackNumbers eq $checkTrackNumbers) {
+        @{$trackArray} = sort { $a->{trackNo} <=> $b->{trackNo} } @{$trackArray};
+        foreach my $trackHash (@{$trackArray}) {
+            $trackHash->{trackOf} = scalar(@{$trackArray});
+            $trackHash->{oldTrack} = $trackHash->{track};
+            $trackHash->{track} = sprintf("%d/%d", $trackHash->{trackNo}, $trackHash->{trackOf});
         }
-        if (grep { $_->{track} ne $_->{old_track} } @{$track_array}) {
+        if (grep { $_->{track} ne $_->{oldTrack} } @{$trackArray}) {
             $self->modified(1);
         }
     }
 
     # so arrays can be compared
-    foreach my $track_hash (@{$track_array}) {
-        # delete $track_hash->{track_no};
-        # delete $track_hash->{track_of};
-        # delete $track_hash->{old_track};
+    foreach my $trackHash (@{$trackArray}) {
+        # delete $trackHash->{trackNo};
+        # delete $trackHash->{trackOf};
+        # delete $trackHash->{oldTrack};
     }
 }
 
-sub fix_tpos {
-    my ($self, $track_array) = @_;
-    foreach my $track_hash (@{$track_array}) {
-        if (defined $track_hash->{tpos}) {
-            if ($track_hash->{tpos} =~ m{^ $RX_INTEGER_OF_INTEGER $}x) {
+sub fixTpos {
+    my ($self, $trackArray) = @_;
+    foreach my $trackHash (@{$trackArray}) {
+        if (defined $trackHash->{tpos}) {
+            if ($trackHash->{tpos} =~ m{^ $RX_INTEGER_OF_INTEGER $}x) {
                 my $new = sprintf("%d/%d", $1 + 0, $2 + 0);
-                if ($new ne $track_hash->{tpos}) {
-                    $track_hash->{tpos} = $new;
+                if ($new ne $trackHash->{tpos}) {
+                    $trackHash->{tpos} = $new;
                     $self->modified(1);
                 }
-            } elsif ($track_hash->{tpos} =~ m{^ $RX_INTEGER $}x) {
+            } elsif ($trackHash->{tpos} =~ m{^ $RX_INTEGER $}x) {
                 my $new = $1 + 0;
-                if ($new ne $track_hash->{tpos}) {
-                    $track_hash->{tpos} = $new;
+                if ($new ne $trackHash->{tpos}) {
+                    $trackHash->{tpos} = $new;
                     $self->modified(1);
                 }
             }
@@ -101,10 +101,10 @@ sub fix_tpos {
     }
 }
 
-sub load_tags_from_files {
+sub loadTagsFromFiles {
     my ($self, @filenames) = @_;
     $self->tracks([]);
-    $self->tracks_by_filename({});
+    $self->tracksByFilename({});
     foreach my $filename (@filenames) {
         next unless $filename =~ m{\.mp3$}i;
 
@@ -114,17 +114,17 @@ sub load_tags_from_files {
             next;
         }
 
-        $mp3->config("prohibit_v24" => 0);
-        $mp3->config("write_v24" => 1);
+        $mp3->config("prohibitV24" => 0);
+        $mp3->config("writeV24" => 1);
 
         my ($title, $track, $artist, $album, $comment, $year, $genre) = $mp3->autoinfo();
-        my $album_artist = $mp3->select_id3v2_frame_by_descr("TPE2"); # "Band/orchestra/accompaniment"
-        my $tcmp         = $mp3->select_id3v2_frame_by_descr("TCMP"); # iTunes Compilation Flag
-        my $tpos         = $mp3->select_id3v2_frame_by_descr("TPOS"); # part of set (e.g., disc 1/2)
+        my $albumArtist = $mp3->selectId3v2FrameByDescr("TPE2"); # "Band/orchestra/accompaniment"
+        my $tcmp         = $mp3->selectId3v2FrameByDescr("TCMP"); # iTunes Compilation Flag
+        my $tpos         = $mp3->selectId3v2FrameByDescr("TPOS"); # part of set (e.g., disc 1/2)
         my $composer     = $mp3->composer();
         my $performer    = $mp3->performer();
 
-        my $track_hash = {
+        my $trackHash = {
             track        => $track,
             artist       => $artist,
             title        => $title,
@@ -133,7 +133,7 @@ sub load_tags_from_files {
             tpos         => $tpos,
 
             genre        => $genre,
-            album_artist => $album_artist,
+            albumArtist => $albumArtist,
             tcmp         => $tcmp,
             filename     => $filename,
             comment      => $comment,
@@ -141,14 +141,14 @@ sub load_tags_from_files {
             performer    => $performer,
         };
 
-        my @keys = keys %$track_hash;
+        my @keys = keys %$trackHash;
         foreach my $key (@keys) {
-            if (is_blank($track_hash->{$key})) {
-                delete $track_hash->{$key};
+            if (isBlank($trackHash->{$key})) {
+                delete $trackHash->{$key};
             }
         }
 
-        if ($self->parse_filenames) {
+        if ($self->parseFilenames) {
             if ($filename =~ m{^
                                (?:(\d+)(?:\s*-+\s*|\s*\.\s*|\s+))?
                                (.*?)
@@ -156,31 +156,31 @@ sub load_tags_from_files {
                                (.*?)
                                (?:\.mp3)?
                                $}xi) {
-                my ($new_track, $new_artist, $new_title) = ($1, $2, $3);
-                if (!is_blank($new_track)) {
-                    $track_hash->{track} = $new_track;
-                    $track_hash->{modified} = 1;
+                my ($newTrack, $newArtist, $newTitle) = ($1, $2, $3);
+                if (!isBlank($newTrack)) {
+                    $trackHash->{track} = $newTrack;
+                    $trackHash->{modified} = 1;
                     $self->modified(1);
                 }
-                if (!is_blank($new_artist)) {
-                    $track_hash->{artist} = $new_artist;
-                    $track_hash->{modified} = 1;
+                if (!isBlank($newArtist)) {
+                    $trackHash->{artist} = $newArtist;
+                    $trackHash->{modified} = 1;
                     $self->modified(1);
                 }
-                if (!is_blank($new_title)) {
-                    $track_hash->{title} = $new_title;
-                    $track_hash->{modified} = 1;
+                if (!isBlank($newTitle)) {
+                    $trackHash->{title} = $newTitle;
+                    $trackHash->{modified} = 1;
                     $self->modified(1);
                 }
             }
         }
 
-        push(@{$self->tracks}, $track_hash);
-        $self->tracks_by_filename->{$filename} = $track_hash;
+        push(@{$self->tracks}, $trackHash);
+        $self->tracksByFilename->{$filename} = $trackHash;
     }
 }
 
-sub create_tags_file_to_edit {
+sub createTagsFileToEdit {
     my ($self, @filenames) = @_;
     if (scalar @{$self->tracks}) {
         my ($fh, $tempname) = tempfile();
@@ -203,37 +203,37 @@ sub create_tags_file_to_edit {
 # Blank out this file to cancel all changes.
 
 EOF
-        my $show_tpos = grep { !is_blank($_->{tpos}) } @{$self->tracks};
-        my %column_widths = ();
-        foreach my $column (qw(artist title album year album_artist)) {
+        my $showTpos = grep { !isBlank($_->{tpos}) } @{$self->tracks};
+        my %columnWidths = ();
+        foreach my $column (qw(artist title album year albumArtist)) {
             my @lengths = map { length($_) } grep { defined $_ } map { $_->{$column} } @{$self->tracks};
             if (scalar @lengths) {
-                $column_widths{$column} = max @lengths;
+                $columnWidths{$column} = max @lengths;
             } else {
-                $column_widths{$column} = 0;
+                $columnWidths{$column} = 0;
             }
         }
-        my $extra_space = 2;
+        my $extraSpace = 2;
 
         foreach my $track (@{$self->tracks}) {
-            printf $fh ("%7s: ",              $track->{tpos} // "") if $show_tpos;
+            printf $fh ("%7s: ",              $track->{tpos} // "") if $showTpos;
             printf $fh ("%7s. ",              $track->{track} // "");
-            printf $fh ("artist=%-*s",        $extra_space + $column_widths{artist},       $track->{artist}       // "");
-            printf $fh ("|title=%-*s",        $extra_space + $column_widths{title},        $track->{title}        // "");
-            printf $fh ("|album=%-*s",        $extra_space + $column_widths{album},        $track->{album}        // "");
-            printf $fh ("|year=%-*s",         $extra_space + $column_widths{year},         $track->{year}         // "");
-            printf $fh ("|album-artist=%-*s", $extra_space + $column_widths{album_artist}, $track->{album_artist} // "");
+            printf $fh ("artist=%-*s",        $extraSpace + $columnWidths{artist},       $track->{artist}       // "");
+            printf $fh ("|title=%-*s",        $extraSpace + $columnWidths{title},        $track->{title}        // "");
+            printf $fh ("|album=%-*s",        $extraSpace + $columnWidths{album},        $track->{album}        // "");
+            printf $fh ("|year=%-*s",         $extraSpace + $columnWidths{year},         $track->{year}         // "");
+            printf $fh ("|album-artist=%-*s", $extraSpace + $columnWidths{albumArtist}, $track->{albumArtist} // "");
             printf $fh ("|filename=%s",       $track->{filename} // "");
             print  $fh "\n";
         }
-        $self->tempname_mtime((stat($tempname))[9]);
+        $self->tempnameMtime((stat($tempname))[9]);
     } else {
         warn("No tracks.  Exiting.\n");
         exit(0);
     }
 }
 
-sub edit_tags_file {
+sub editTagsFile {
     my ($self) = @_;
     my $editor = $ENV{VISUAL} // $ENV{EDITOR} //
         which('nano') // which('pico') // which('vi');
@@ -246,43 +246,43 @@ sub edit_tags_file {
     my $result = system(@editor, $self->tempname);
     my $mtime = (stat($self->tempname))[9];
     if ($result) {
-        $self->editor_failed();
+        $self->editorFailed();
     } else {
-        if ($mtime != $self->tempname_mtime) {
+        if ($mtime != $self->tempnameMtime) {
             $self->modified(1);
         }
     }
     if (!$self->modified) {
-        if (!$self->force && !$self->dry_run) {
-            $self->not_modified();
+        if (!$self->force && !$self->dryRun) {
+            $self->notModified();
         }
     }
 }
 
-sub editor_failed {
+sub editorFailed {
     my ($self) = @_;
     warn("Editor failed.  Exiting.\n");
     unlink($self->tempname);
     exit(1);
 }
 
-sub not_modified {
+sub notModified {
     my ($self) = @_;
     warn("Not modified.  Exiting.\n");
     unlink($self->tempname);
     exit(0);
 }
 
-sub load_tags_from_tags_file {
+sub loadTagsFromTagsFile {
     my ($self) = @_;
     my $tempname = $self->tempname;
     my $fh;
     open($fh, "<", $tempname) or die("Cannot read $tempname: $!\n");
     $self->album({});
-    my $last_line_album = 0;
-    my $last_line_track = 0;
-    $self->edited_tracks([]);
-    $self->edited_tracks_by_filename({});
+    my $lastLineAlbum = 0;
+    my $lastLineTrack = 0;
+    $self->editedTracks([]);
+    $self->editedTracksByFilename({});
     local $. = 0;
     while (<$fh>) {
         next if m{^\s*\#};      # ignore comments;
@@ -290,7 +290,7 @@ sub load_tags_from_tags_file {
         next unless m{\S};      # skip blank lines
 
         if (!m{\|}) {
-            if (!$last_line_album) {
+            if (!$lastLineAlbum) {
                 $self->album({});
             }
             s{^\s+}{};
@@ -298,7 +298,7 @@ sub load_tags_from_tags_file {
             if (m{\s*=\s*}) {
                 my ($key, $value) = ($`, $');
                 $key =~ s{-+}{_}g;
-                if (is_blank($value)) {
+                if (isBlank($value)) {
                     delete $self->album->{$key};
                 } else {
                     $self->album->{$key} = $value;
@@ -307,17 +307,17 @@ sub load_tags_from_tags_file {
                 s{-+}{_}g;
                 $self->album->{$_} = 1;
             }
-            $last_line_album = 1;
-            $last_line_track = 0;
+            $lastLineAlbum = 1;
+            $lastLineTrack = 0;
             next;
         }
-        my $track_hash = {};
+        my $trackHash = {};
 
         if (s{^ ($RX_INTEGER_OF_INTEGER|$RX_INTEGER) \: \s* }{}x) {
-            $track_hash->{tpos} = $1;
+            $trackHash->{tpos} = $1;
         }
         if (s{^ ($RX_INTEGER_OF_INTEGER|$RX_INTEGER) \. \s* }{}x) {
-            $track_hash->{track} = $1;
+            $trackHash->{track} = $1;
         }
 
         my @kv = split(/\|/, $_);
@@ -326,46 +326,46 @@ sub load_tags_from_tags_file {
             s{\s+$}{};
             if (m{\s*=\s*}) {
                 my ($key, $value) = ($`, $');
-                if (is_blank($value)) {
-                    delete $track_hash->{$key};
+                if (isBlank($value)) {
+                    delete $trackHash->{$key};
                 } else {
-                    $track_hash->{$key} = $value;
+                    $trackHash->{$key} = $value;
                 }
             } else {
-                $track_hash->{$_} = 1;
+                $trackHash->{$_} = 1;
             }
         }
-        push(@{$self->edited_tracks}, $track_hash);
-        $self->edited_tracks_by_filename->{$track_hash->{filename}} = $track_hash;
+        push(@{$self->editedTracks}, $trackHash);
+        $self->editedTracksByFilename->{$trackHash->{filename}} = $trackHash;
         if ($self->verbose >= 3) {
-            warn Dumper($track_hash);
+            warn Dumper($trackHash);
         }
 
-        $last_line_album = 0;
-        $last_line_track = 1;
+        $lastLineAlbum = 0;
+        $lastLineTrack = 1;
     }
 }
 
-sub save_tags {
+sub saveTags {
     my ($self) = @_;
 
-    foreach my $track_hash (@{$self->edited_tracks}) {
-        my $filename = $track_hash->{filename};
-        if (is_blank($filename)) {
+    foreach my $trackHash (@{$self->editedTracks}) {
+        my $filename = $trackHash->{filename};
+        if (isBlank($filename)) {
             warn("No filename on $filename line $.\n");
             next;
         }
 
-        my $track    = $track_hash->{track};
-        my $artist   = $self->album->{artist} // $track_hash->{artist};
-        my $title    = $track_hash->{title};
-        my $album    = $self->album->{album}  // $track_hash->{album};
-        my $year     = $self->album->{year}   // $track_hash->{year};
-        my $tpos     = $track_hash->{tpos};
+        my $track    = $trackHash->{track};
+        my $artist   = $self->album->{artist} // $trackHash->{artist};
+        my $title    = $trackHash->{title};
+        my $album    = $self->album->{album}  // $trackHash->{album};
+        my $year     = $self->album->{year}   // $trackHash->{year};
+        my $tpos     = $trackHash->{tpos};
 
-        my $album_artist;
-        if ($self->album->{various_artists}) {
-            $album_artist = $artist;
+        my $albumArtist;
+        if ($self->album->{variousArtists}) {
+            $albumArtist = $artist;
             $artist = "Various Artists";
         }
 
@@ -375,10 +375,10 @@ sub save_tags {
             next;
         }
 
-        $mp3->config("prohibit_v24" => 0);
-        $mp3->config("write_v24" => 1);
+        $mp3->config("prohibitV24" => 0);
+        $mp3->config("writeV24" => 1);
 
-        if ($self->verbose >= 2 || ($self->dry_run && $self->verbose)) {
+        if ($self->verbose >= 2 || ($self->dryRun && $self->verbose)) {
             printf("%s\n", $filename);
             printf("  TRACK        = %s\n", $track        // "");
             printf("  ARTIST       = %s\n", $artist       // "");
@@ -386,34 +386,34 @@ sub save_tags {
             printf("  ALBUM        = %s\n", $album        // "");
             printf("  YEAR         = %s\n", $year         // "");
             printf("  TPOS (DISC)  = %s\n", $tpos         // "");
-            printf("  ALBUM_ARTIST = %s\n", $album_artist // "");
+            printf("  ALBUM_ARTIST = %s\n", $albumArtist // "");
         }
-        if (!$self->dry_run) {
-            $mp3->title_set($title // "", 1);
-            $mp3->artist_set($artist // "", 1);
-            $mp3->year_set($year // "", 1);
-            $mp3->album_set($album // "", 1);
-            $mp3->track_set($track // "", 1);
-            $mp3->select_id3v2_frame_by_descr("TPOS", $tpos // "");
-            if ($self->album->{various_artists}) {
-                $mp3->select_id3v2_frame_by_descr("TPE2", $album_artist);
-                $mp3->select_id3v2_frame_by_descr("TCMP", "1");
+        if (!$self->dryRun) {
+            $mp3->titleSet($title // "", 1);
+            $mp3->artistSet($artist // "", 1);
+            $mp3->yearSet($year // "", 1);
+            $mp3->albumSet($album // "", 1);
+            $mp3->trackSet($track // "", 1);
+            $mp3->selectId3v2FrameByDescr("TPOS", $tpos // "");
+            if ($self->album->{variousArtists}) {
+                $mp3->selectId3v2FrameByDescr("TPE2", $albumArtist);
+                $mp3->selectId3v2FrameByDescr("TCMP", "1");
             } else {
-                $mp3->select_id3v2_frame_by_descr("TPE2", ''); # not undef
-                $mp3->select_id3v2_frame_by_descr("TCMP", undef);
+                $mp3->selectId3v2FrameByDescr("TPE2", ''); # not undef
+                $mp3->selectId3v2FrameByDescr("TCMP", undef);
             }
             if ($self->verbose) {
                 warn("Updating tags on $filename\n");
             }
-            $mp3->update_tags(undef, 1);
+            $mp3->updateTags(undef, 1);
         }
-        if ($self->verbose && !$self->dry_run) {
+        if ($self->verbose && !$self->dryRun) {
             print("Done.\n");
         }
     }
 }
 
-sub is_blank {
+sub isBlank {
     my ($string) = @_;
     return 1 if !defined $string;
     return 1 if $string !~ m{\S};
