@@ -369,15 +369,6 @@ sub saveTags {
             $artist = "Various Artists";
         }
 
-        my $mp3 = MP3::Tag->new($filename);
-        if (!defined $mp3) {
-            warn("edit-mp3-tags: could not read tags for $filename\n");
-            next;
-        }
-
-        $mp3->config("prohibitV24" => 0);
-        $mp3->config("writeV24" => 1);
-
         if ($self->verbose >= 2 || ($self->dryRun && $self->verbose)) {
             printf("%s\n", $filename);
             printf("  TRACK        = %s\n", $track       // "");
@@ -389,6 +380,15 @@ sub saveTags {
             printf("  ALBUM_ARTIST = %s\n", $albumArtist // "");
         }
         if (!$self->dryRun) {
+            my $mp3 = MP3::Tag->new($filename);
+            if (!defined $mp3) {
+                warn("edit-mp3-tags: could not read tags for $filename\n");
+                next;
+            }
+
+            $mp3->config("prohibitV24" => 0);
+            $mp3->config("writeV24" => 1);
+
             $mp3->titleSet($title // "", 1);
             $mp3->artistSet($artist // "", 1);
             $mp3->yearSet($year // "", 1);
