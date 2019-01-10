@@ -536,15 +536,13 @@ sub getTagsFromMP3Tag {
     my ($self, $mp3) = @_;
 
     my @autoinfoFields = qw(title track artist album comment year genre);
-    my @trimFields     = qw(title artist album albumArtist composer performer);
+    my @trimFields     = qw(title artist album albumArtist);
 
     my $tags = {};
     @{$tags}->{@autoinfoFields} = $mp3->autoinfo();
     $tags->{albumArtist} = $mp3->select_id3v2_frame_by_descr("TPE2"); # "Band/orchestra/accompaniment"
     $tags->{tcmp}        = $mp3->select_id3v2_frame_by_descr("TCMP"); # iTunes Compilation Flag
     $tags->{tpos}        = $mp3->select_id3v2_frame_by_descr("TPOS"); # part of set (e.g., disc 1/2)
-    $tags->{composer}    = $mp3->composer();
-    $tags->{performer}   = $mp3->performer();
 
     foreach my $field (@trimFields) {
         $tags->{$field} = trim($tags->{$field}) if defined $tags->{$field};
