@@ -182,38 +182,11 @@ sub loadTagsFromFiles {
         $mp3->config("prohibit_v24" => 0);
         $mp3->config("write_v24" => 1);
 
-        my ($title, $track, $artist, $album, $comment, $year, $genre) = $mp3->autoinfo();
-        my $albumArtist = $mp3->select_id3v2_frame_by_descr("TPE2"); # "Band/orchestra/accompaniment"
-        my $tcmp        = $mp3->select_id3v2_frame_by_descr("TCMP"); # iTunes Compilation Flag
-        my $tpos        = $mp3->select_id3v2_frame_by_descr("TPOS"); # part of set (e.g., disc 1/2)
-        my $composer    = $mp3->composer();
-        my $performer   = $mp3->performer();
-
-        my $dirname  = dirname($filename);
-        my $basename = basename($filename);
-
-        foreach ($artist, $title, $album, $albumArtist, $composer, $performer) {
-            $_ = trim($_) if defined $_;
-        }
-
-        my $trackHash = {
-            track       => $track,
-            artist      => $artist,
-            title       => $title,
-            album       => $album,
-            year        => $year,
-            tpos        => $tpos,
-            genre       => $genre,
-            albumArtist => $albumArtist,
-            tcmp        => $tcmp,
-            filename    => $filename,
-            comment     => $comment,
-            composer    => $composer,
-            performer   => $performer,
-            dirname     => $dirname,
-            basename    => $basename,
-            origIndex   => $origIndex,
-        };
+        my $trackHash = $self->getTagsFromMP3Tag($mp3);
+        $trackHash->{filename}  = $filename;
+        $trackHash->{origIndex} = $origIndex;
+        $trackHash->{dirname}   = dirname($filename);
+        $trackHash->{basename}  = basename($filename);
 
         my @keys = keys %$trackHash;
         foreach my $key (@keys) {
@@ -487,23 +460,23 @@ sub saveTags {
             next;
         }
 
-        my $track       = $trackHash->{track};
-        my $artist      = $trackHash->{artist};
-        my $title       = $trackHash->{title};
-        my $album       = $trackHash->{album};
-        my $year        = $trackHash->{year};
-        my $tpos        = $trackHash->{tpos};
-        my $albumArtist = $trackHash->{album_artist};
+        # my $track       = $trackHash->{track};
+        # my $artist      = $trackHash->{artist};
+        # my $title       = $trackHash->{title};
+        # my $album       = $trackHash->{album};
+        # my $year        = $trackHash->{year};
+        # my $tpos        = $trackHash->{tpos};
+        # my $albumArtist = $trackHash->{album_artist};
 
         if ($self->verbose >= 2 || ($self->dryRun && $self->verbose)) {
             printf("%s\n", $filename);
-            printf("  TRACK        = %s\n", $track       // "");
-            printf("  ARTIST       = %s\n", $artist      // "");
-            printf("  TITLE        = %s\n", $title       // "");
-            printf("  ALBUM        = %s\n", $album       // "");
-            printf("  YEAR         = %s\n", $year        // "");
-            printf("  TPOS (DISC)  = %s\n", $tpos        // "");
-            printf("  ALBUM_ARTIST = %s\n", $albumArtist // "");
+            printf("  TRACK        = %s\n", $trackHash->{track}       // "");
+            printf("  ARTIST       = %s\n", $trackHash->{artist}      // "");
+            printf("  TITLE        = %s\n", $trackHash->{title}       // "");
+            printf("  ALBUM        = %s\n", $trackHash->{album}       // "");
+            printf("  YEAR         = %s\n", $trackHash->{year}        // "");
+            printf("  TPOS (DISC)  = %s\n", $trackHash->{tpos}        // "");
+            printf("  ALBUM_ARTIST = %s\n", $trackHash->{albumArtist} // "");
         }
         if ($self->dryRun) {
             next;
@@ -517,18 +490,38 @@ sub saveTags {
         $mp3->config("prohibit_v24" => 0);
         $mp3->config("write_v24" => 1);
 
-        $mp3->title_set($title // "", 1);
-        $mp3->artist_set($artist // "", 1);
-        $mp3->year_set($year // "", 1);
-        $mp3->album_set($album // "", 1);
-        $mp3->track_set($track // "", 1);
-        $mp3->select_id3v2_frame_by_descr("TPOS", $tpos // "");
-        $mp3->select_id3v2_frame_by_descr("TPE2", $albumArtist);
-        if ($albumArtist eq "Various Artists") {
-            $mp3->select_id3v2_frame_by_descr("TCMP", "1");
+        if ($trackHash->{albumArtist} eq "Various Artists") {
+            $trackHash->{tcmp} = 1;
         } else {
-            $mp3->select_id3v2_frame_by_descr("TCMP", undef);
+            $trackHash->{tcmp} = undef;
         }
+
+        my $noChange = 1;
+        my $oldTags = $self->getTagsFromMP3Tag($mp3);
+        foreach my $key (keys %$oldTags) {
+            if (($oldTags->{$key} // "") ne ($trackHash->{$key} // "")) {
+                $noChange = 0;
+                last;
+            }
+        }
+        if ($noChange) {
+            if ($self->verbose) {
+                warn("No changes to tags in $filename\n");
+            }
+            next;
+        }
+
+        # second arg is force_id3v2
+        $mp3->title_set($trackHash->{title} // "", 1);
+        $mp3->artist_set($trackHash->{artist} // "", 1);
+        $mp3->year_set($trackHash->{year} // "", 1);
+        $mp3->album_set($trackHash->{album} // "", 1);
+        $mp3->track_set($trackHash->{track} // "", 1);
+
+        $mp3->select_id3v2_frame_by_descr("TPOS", $trackHash->{tpos} // "");
+        $mp3->select_id3v2_frame_by_descr("TPE2", $trackHash->{albumArtist} // "");
+        $mp3->select_id3v2_frame_by_descr("TCMP", $trackHash->{tcmp});
+
         if ($self->verbose) {
             warn("Updating tags on $filename\n");
         }
@@ -537,6 +530,27 @@ sub saveTags {
             print("Done.\n");
         }
     }
+}
+
+sub getTagsFromMP3Tag {
+    my ($self, $mp3) = @_;
+
+    my @autoinfoFields = qw(title track artist album comment year genre);
+    my @trimFields     = qw(title artist album albumArtist composer performer);
+
+    my $tags = {};
+    @{$tags}->{@autoinfoFields} = $mp3->autoinfo();
+    $tags->{albumArtist} = $mp3->select_id3v2_frame_by_descr("TPE2"); # "Band/orchestra/accompaniment"
+    $tags->{tcmp}        = $mp3->select_id3v2_frame_by_descr("TCMP"); # iTunes Compilation Flag
+    $tags->{tpos}        = $mp3->select_id3v2_frame_by_descr("TPOS"); # part of set (e.g., disc 1/2)
+    $tags->{composer}    = $mp3->composer();
+    $tags->{performer}   = $mp3->performer();
+
+    foreach my $field (@trimFields) {
+        $tags->{$field} = trim($tags->{$field}) if defined $tags->{$field};
+    }
+
+    return $tags;
 }
 
 sub isBlank {
