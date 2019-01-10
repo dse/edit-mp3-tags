@@ -490,7 +490,7 @@ sub saveTags {
         $mp3->config("prohibit_v24" => 0);
         $mp3->config("write_v24" => 1);
 
-        if ($trackHash->{albumArtist} eq "Various Artists") {
+        if (($trackHash->{albumArtist} // "") eq "Various Artists") {
             $trackHash->{tcmp} = 1;
         } else {
             $trackHash->{tcmp} = undef;
@@ -539,7 +539,7 @@ sub getTagsFromMP3Tag {
     my @trimFields     = qw(title artist album albumArtist);
 
     my $tags = {};
-    @{$tags}->{@autoinfoFields} = $mp3->autoinfo();
+    @{$tags}{@autoinfoFields} = $mp3->autoinfo();
     $tags->{albumArtist} = $mp3->select_id3v2_frame_by_descr("TPE2"); # "Band/orchestra/accompaniment"
     $tags->{tcmp}        = $mp3->select_id3v2_frame_by_descr("TCMP"); # iTunes Compilation Flag
     $tags->{tpos}        = $mp3->select_id3v2_frame_by_descr("TPOS"); # part of set (e.g., disc 1/2)
