@@ -9,7 +9,8 @@ use Data::Dumper;
 use Text::ParseWords;
 use Text::Trim;
 use File::Which;
-use List::Util qw(max);
+use List::Util qw(max min uniq);
+use File::Basename qw(dirname basename);
 
 use Moo;
 
@@ -25,10 +26,15 @@ has tracksByFilename       => (is => 'rw', default => sub { return {}; });
 has tracks                 => (is => 'rw', default => sub { return []; });
 has verbose                => (is => 'rw', default => 0);
 
+use lib "$ENV{HOME}/git/dse.d/music-scripts/lib";
+use My::Music::Util;
+
 sub run {
-    my ($self, @filenames) = @_;
+    my ($self, @args) = @_;
+    my @filenames = My::Music::Util->findSongs(filenames => \@args);
     $self->loadTagsFromFiles(@filenames);
     $self->fixTrackNumbers($self->tracks);
+    $self->sortTracks($self->tracks);
     $self->createTagsFileToEdit();
     $self->editTagsFile();
     $self->loadTagsFromTagsFile();
@@ -45,38 +51,97 @@ BEGIN {
     $RX_INTEGER            = qr{(?: \s* (\d+) \s*                        )}xi;
 }
 
+sub hasMultipleDirectories {
+    my ($self) = @_;
+    my @dirname = map { $_->{dirname} } @{$self->tracks};
+    my %dirname = map { ($_, 1) } @dirname;
+    my $hasMultipleDirectories = (scalar keys %dirname) != 1;
+    return $hasMultipleDirectories;
+}
+
 sub fixTrackNumbers {
-    my ($self, $trackArray) = @_;
-    foreach my $trackHash (@{$trackArray}) {
-        my $track = $trackHash->{track};
-        if ($track =~ m{^ $RX_INTEGER_OF_INTEGER $}x) {
-            $trackHash->{trackNo} = $1 + 0;
-            $trackHash->{trackOf} = $2 + 0;
-        } elsif ($track =~ m{^ $RX_INTEGER $}x) {
-            $trackHash->{trackNo} = $1 + 0;
-            $trackHash->{trackOf} = undef;
-        }
-    }
-    my $sortedTrackNumbers = join(",", sort { $a <=> $b } map { $_->{trackNo} // 0 } @{$trackArray});
-    my $checkTrackNumbers  = join(",", 1 .. scalar(@{$trackArray}));
-    if ($sortedTrackNumbers eq $checkTrackNumbers) {
-        @{$trackArray} = sort { $a->{trackNo} <=> $b->{trackNo} } @{$trackArray};
-        foreach my $trackHash (@{$trackArray}) {
-            $trackHash->{trackOf} = scalar(@{$trackArray});
-            $trackHash->{oldTrack} = $trackHash->{track};
-            $trackHash->{track} = sprintf("%d/%d", $trackHash->{trackNo}, $trackHash->{trackOf});
-        }
-        if (grep { $_->{track} ne $_->{oldTrack} } @{$trackArray}) {
-            $self->modified(1);
-        }
+    my ($self, $allTracksArray) = @_;
+
+    my %trackArrayByDirname = ();
+    foreach my $trackHash (@{$allTracksArray}) {
+        my $dirname = $trackHash->{dirname};
+        push(@{$trackArrayByDirname{$dirname}}, $trackHash);
     }
 
-    # so arrays can be compared
-    foreach my $trackHash (@{$trackArray}) {
-        # delete $trackHash->{trackNo};
-        # delete $trackHash->{trackOf};
-        # delete $trackHash->{oldTrack};
+    foreach my $dirname (sort keys %trackArrayByDirname) {
+        my $trackArray = $trackArrayByDirname{$dirname};
+
+        # populate track numbers from track number fields
+        foreach my $trackHash (@{$trackArray}) {
+            my $track = $trackHash->{track};
+            if (defined $track && $track =~ m{^ $RX_INTEGER_OF_INTEGER $}x) {
+                $trackHash->{trackNo} = $1 + 0;
+                $trackHash->{trackOf} = $2 + 0;
+            } elsif (defined $track && $track =~ m{^ $RX_INTEGER $}x) {
+                $trackHash->{trackNo} = $1 + 0;
+                $trackHash->{trackOf} = undef;
+            }
+        }
+
+        # if no track number fields found, extract from filenames
+        if (!grep { defined $_->{trackNo} } @{$trackArray}) {
+            my @trackNumbers = $self->findTrackNumbersInFilenames(@{$trackArray});
+            if (scalar @trackNumbers == scalar @{$trackArray}) {
+                for (my $i = 0; $i < scalar @trackNumbers; $i += 1) {
+                    $trackArray->[$i]->{trackNo} = $trackNumbers[$i];
+                }
+            }
+        }
+
+        # if track numbers are 1 to <total> where <total> is the
+        # number of tracks, make sure all tracks are <n>/<total>.
+        my $sortedTrackNumbers = join(",", sort { $a <=> $b } map { $_->{trackNo} // 0 } @{$trackArray});
+        my $checkTrackNumbers  = join(",", 1 .. scalar(@{$trackArray}));
+        if ($sortedTrackNumbers eq $checkTrackNumbers) {
+            @{$trackArray} = sort { $a->{trackNo} <=> $b->{trackNo} } @{$trackArray};
+            foreach my $trackHash (@{$trackArray}) {
+                $trackHash->{trackOf} = scalar(@{$trackArray});
+                $trackHash->{oldTrack} = $trackHash->{track};
+                $trackHash->{track} = sprintf("%d/%d", $trackHash->{trackNo}, $trackHash->{trackOf});
+            }
+            if (grep { ($_->{track} // "") ne ($_->{oldTrack} // "") } @{$trackArray}) {
+                $self->modified(1);
+            }
+        }
     }
+}
+
+sub findTrackNumbersInFilenames {
+    my ($self, @tracks) = @_;
+    return unless scalar @tracks >= 2;
+    my $prefix = $self->findCommonPrefix(map { $_->{basename} } @tracks);
+    return if length $prefix <= 0;
+    my @theRest = map { substr($_->{basename}, length $prefix) } @tracks;
+    my @trackNumbers = $self->getTrackNumbersIfAll(@theRest);
+    return @trackNumbers;
+}
+
+sub findCommonPrefix {
+    my ($self, @strings) = @_;
+    return unless scalar @strings;
+    my $minLength = min map { length $_ } @strings;
+    return if $minLength < 1;
+    my $result = 0;
+    for (my $length = 1; $length <= $minLength; $length += 1) {
+        my @substrings = map { substr($_, 0, $length) } @strings;
+        my @uniq = uniq sort @substrings;
+        last if (scalar @uniq != 1);
+        ($result) = @uniq;
+    }
+    return $result;
+}
+
+sub getTrackNumbersIfAll {
+    my ($self, @strings) = @_;
+    return unless scalar @strings;
+    my @numbers = map { $_ =~ m{^\d+} ? ($& + 0) : undef } @strings;
+    return @numbers if !grep { !defined $_ } @numbers;
+    return;
 }
 
 sub fixTpos {
@@ -126,6 +191,10 @@ sub loadTagsFromFiles {
 
         my $dirname  = dirname($filename);
         my $basename = basename($filename);
+
+        foreach ($artist, $title, $album, $albumArtist, $composer, $performer) {
+            $_ = trim($_) if defined $_;
+        }
 
         my $trackHash = {
             track       => $track,
@@ -183,10 +252,15 @@ sub loadTagsFromFiles {
         push(@{$self->tracks}, $trackHash);
         $self->tracksByFilename->{$filename} = $trackHash;
     }
+}
 
-    @{$self->tracks} = sort {
-        ($a->{dirname} cmp $b->{dirname}) || ($a->{origIndex} <=> $b->{origIndex})
-    } @{$self->tracks};
+sub sortTracks {
+    my ($self, $array) = @_;
+    @$array = sort {
+        ($a->{dirname} cmp $b->{dirname}) ||
+            ($a->{trackNo} <=> $b->{trackNo}) ||
+            ($a->{origIndex} <=> $b->{origIndex})
+    } @$array;
 }
 
 sub createTagsFileToEdit {
@@ -195,17 +269,13 @@ sub createTagsFileToEdit {
         my ($fh, $tempname) = tempfile();
         $self->tempname($tempname);
 
-        my @dirname = map { $_->{dirname} } @{$self->tracks};
-        my %dirname = map { ($_, 1) } @dirname;
-        my $isInMultipleDirectories = scalar keys %dirname == 1;
+        my $hasMultipleDirectories = $self->hasMultipleDirectories;
 
-        print $fh <<"EOF" if !$isInMultipleDirectories;
+        print $fh <<"EOF" if !$hasMultipleDirectories;
 # Lines starting with '#' are ignored.
 
-# Un-comment the following line for various-artists compilations.
-#various-artists
-
 # Un-comment and edit any of the following line(s) for albums.
+#album-artist=Various Artists
 #artist=<artist>
 #album=<album>
 #year=<year>
@@ -217,13 +287,11 @@ sub createTagsFileToEdit {
 # Blank out this file to cancel all changes.
 
 EOF
-        print $fh <<"EOF" if $isInMultipleDirectories;
+        print $fh <<"EOF" if $hasMultipleDirectories;
 # Lines starting with '#' are ignored.
 
-# Un-comment lines like the following for various-artists compilations.
-#     #various-artists
-
 # Un-comment and edit lines like the following for albums.
+#     #album-artist=Various Artists
 #     #artist=<artist>
 #     #album=<album>
 #     #year=<year>
@@ -250,23 +318,24 @@ EOF
         my $previousDirname;
         foreach my $track (@{$self->tracks}) {
             my $dirname = $track->{dirname};
-            if ($isInMultipleDirectories) {
-                if (!defined $dirname || $dirname ne $previousDirname) {
+            if ($hasMultipleDirectories) {
+                if (!defined $previousDirname || $dirname ne $previousDirname) {
                     print $fh "\n";
                     print $fh "[album]\n";
-                    print $fh "#various-artists\n";
+                    print $fh "#album-artist=Various Artists\n";
                     print $fh "#artist=<artist>\n";
                     print $fh "#album=<album>\n";
                     print $fh "#year=<year>\n";
                     print $fh "\n";
                 }
+                $previousDirname = $dirname;
             }
             printf $fh ("%7s: ",              $track->{tpos} // "") if $showTpos;
             printf $fh ("%7s. ",              $track->{track} // "");
-            printf $fh ("artist=%-*s",        $extraSpace + $columnWidths{artist},       $track->{artist}       // "");
-            printf $fh ("|title=%-*s",        $extraSpace + $columnWidths{title},        $track->{title}        // "");
-            printf $fh ("|album=%-*s",        $extraSpace + $columnWidths{album},        $track->{album}        // "");
-            printf $fh ("|year=%-*s",         $extraSpace + $columnWidths{year},         $track->{year}         // "");
+            printf $fh ("artist=%-*s",        $extraSpace + $columnWidths{artist},      $track->{artist}      // "");
+            printf $fh ("|title=%-*s",        $extraSpace + $columnWidths{title},       $track->{title}       // "");
+            printf $fh ("|album=%-*s",        $extraSpace + $columnWidths{album},       $track->{album}       // "");
+            printf $fh ("|year=%-*s",         $extraSpace + $columnWidths{year},        $track->{year}        // "");
             printf $fh ("|album-artist=%-*s", $extraSpace + $columnWidths{albumArtist}, $track->{albumArtist} // "");
             printf $fh ("|filename=%s",       $track->{filename} // "");
             print  $fh "\n";
@@ -393,6 +462,10 @@ sub loadTagsFromTagsFile {
             $trackHash->{$k} = $album->{$k};
         }
 
+        my $filename = $trackHash->{filename};
+        $trackHash->{dirname}  = dirname($filename)  if defined $filename;
+        $trackHash->{basename} = basename($filename) if defined $filename;
+
         push(@{$self->editedTracks}, $trackHash);
         $self->editedTracksByFilename->{$trackHash->{filename}} = $trackHash;
         if ($self->verbose >= 3) {
@@ -414,18 +487,13 @@ sub saveTags {
             next;
         }
 
-        my $track  = $trackHash->{track};
-        my $artist = $trackHash->{artist};
-        my $title  = $trackHash->{title};
-        my $album  = $trackHash->{album};
-        my $year   = $trackHash->{year};
-        my $tpos   = $trackHash->{tpos};
-
-        my $albumArtist;
-        if ($self->album->{various_artists}) {
-            $albumArtist = $artist;
-            $artist = "Various Artists";
-        }
+        my $track       = $trackHash->{track};
+        my $artist      = $trackHash->{artist};
+        my $title       = $trackHash->{title};
+        my $album       = $trackHash->{album};
+        my $year        = $trackHash->{year};
+        my $tpos        = $trackHash->{tpos};
+        my $albumArtist = $trackHash->{album_artist};
 
         if ($self->verbose >= 2 || ($self->dryRun && $self->verbose)) {
             printf("%s\n", $filename);
@@ -455,11 +523,10 @@ sub saveTags {
         $mp3->album_set($album // "", 1);
         $mp3->track_set($track // "", 1);
         $mp3->select_id3v2_frame_by_descr("TPOS", $tpos // "");
-        if ($self->album->{various_artists}) {
-            $mp3->select_id3v2_frame_by_descr("TPE2", $albumArtist);
+        $mp3->select_id3v2_frame_by_descr("TPE2", $albumArtist);
+        if ($albumArtist eq "Various Artists") {
             $mp3->select_id3v2_frame_by_descr("TCMP", "1");
         } else {
-            $mp3->select_id3v2_frame_by_descr("TPE2", ''); # not undef
             $mp3->select_id3v2_frame_by_descr("TCMP", undef);
         }
         if ($self->verbose) {
