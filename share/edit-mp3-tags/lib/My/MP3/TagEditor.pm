@@ -13,7 +13,6 @@ use List::Util qw(max);
 
 use Moo;
 
-has album                  => (is => 'rw');
 has dryRun                 => (is => 'rw', default => 0);
 has editedTracksByFilename => (is => 'rw', default => sub { return {}; });
 has editedTracks           => (is => 'rw', default => sub { return []; });
@@ -113,7 +112,6 @@ sub loadTagsFromFiles {
             warn("edit-mp3-tags: could not read tags for $filename\n");
             next;
         }
-
         $mp3->config("prohibitV24" => 0);
         $mp3->config("writeV24" => 1);
 
@@ -278,7 +276,7 @@ sub loadTagsFromTagsFile {
     my $tempname = $self->tempname;
     my $fh;
     open($fh, "<", $tempname) or die("Cannot read $tempname: $!\n");
-    $self->album({});
+    my $album = {};
     my $lastLineAlbum = 0;
     my $lastLineTrack = 0;
     $self->editedTracks([]);
@@ -291,7 +289,7 @@ sub loadTagsFromTagsFile {
 
         if (!m{\|}) {
             if (!$lastLineAlbum) {
-                $self->album({});
+                $album = {};
             }
             s{^\s+}{};
             s{\s+$}{};
@@ -299,13 +297,13 @@ sub loadTagsFromTagsFile {
                 my ($key, $value) = ($`, $');
                 $key =~ s{-+}{_}g;
                 if (isBlank($value)) {
-                    delete $self->album->{$key};
+                    delete $album->{$key};
                 } else {
-                    $self->album->{$key} = $value;
+                    $album->{$key} = $value;
                 }
             } else {
                 s{-+}{_}g;
-                $self->album->{$_} = 1;
+                $album->{$_} = 1;
             }
             $lastLineAlbum = 1;
             $lastLineTrack = 0;
@@ -335,6 +333,11 @@ sub loadTagsFromTagsFile {
                 $trackHash->{$_} = 1;
             }
         }
+
+        foreach my $k (keys %$album) {
+            $trackHash->{$k} = $album->{$k};
+        }
+
         push(@{$self->editedTracks}, $trackHash);
         $self->editedTracksByFilename->{$trackHash->{filename}} = $trackHash;
         if ($self->verbose >= 3) {
@@ -356,12 +359,12 @@ sub saveTags {
             next;
         }
 
-        my $track    = $trackHash->{track};
-        my $artist   = $self->album->{artist} // $trackHash->{artist};
-        my $title    = $trackHash->{title};
-        my $album    = $self->album->{album}  // $trackHash->{album};
-        my $year     = $self->album->{year}   // $trackHash->{year};
-        my $tpos     = $trackHash->{tpos};
+        my $track  = $trackHash->{track};
+        my $artist = $trackHash->{artist};
+        my $title  = $trackHash->{title};
+        my $album  = $trackHash->{album};
+        my $year   = $trackHash->{year};
+        my $tpos   = $trackHash->{tpos};
 
         my $albumArtist;
         if ($self->album->{variousArtists}) {
@@ -379,35 +382,36 @@ sub saveTags {
             printf("  TPOS (DISC)  = %s\n", $tpos        // "");
             printf("  ALBUM_ARTIST = %s\n", $albumArtist // "");
         }
-        if (!$self->dryRun) {
-            my $mp3 = MP3::Tag->new($filename);
-            if (!defined $mp3) {
-                warn("edit-mp3-tags: could not read tags for $filename\n");
-                next;
-            }
-
-            $mp3->config("prohibitV24" => 0);
-            $mp3->config("writeV24" => 1);
-
-            $mp3->titleSet($title // "", 1);
-            $mp3->artistSet($artist // "", 1);
-            $mp3->yearSet($year // "", 1);
-            $mp3->albumSet($album // "", 1);
-            $mp3->trackSet($track // "", 1);
-            $mp3->selectId3v2FrameByDescr("TPOS", $tpos // "");
-            if ($self->album->{variousArtists}) {
-                $mp3->selectId3v2FrameByDescr("TPE2", $albumArtist);
-                $mp3->selectId3v2FrameByDescr("TCMP", "1");
-            } else {
-                $mp3->selectId3v2FrameByDescr("TPE2", ''); # not undef
-                $mp3->selectId3v2FrameByDescr("TCMP", undef);
-            }
-            if ($self->verbose) {
-                warn("Updating tags on $filename\n");
-            }
-            $mp3->updateTags(undef, 1);
+        if ($self->dryRun) {
+            next;
         }
-        if ($self->verbose && !$self->dryRun) {
+
+        my $mp3 = MP3::Tag->new($filename);
+        if (!defined $mp3) {
+            warn("edit-mp3-tags: could not read tags for $filename\n");
+            next;
+        }
+        $mp3->config("prohibitV24" => 0);
+        $mp3->config("writeV24" => 1);
+
+        $mp3->titleSet($title // "", 1);
+        $mp3->artistSet($artist // "", 1);
+        $mp3->yearSet($year // "", 1);
+        $mp3->albumSet($album // "", 1);
+        $mp3->trackSet($track // "", 1);
+        $mp3->selectId3v2FrameByDescr("TPOS", $tpos // "");
+        if ($self->album->{variousArtists}) {
+            $mp3->selectId3v2FrameByDescr("TPE2", $albumArtist);
+            $mp3->selectId3v2FrameByDescr("TCMP", "1");
+        } else {
+            $mp3->selectId3v2FrameByDescr("TPE2", ''); # not undef
+            $mp3->selectId3v2FrameByDescr("TCMP", undef);
+        }
+        if ($self->verbose) {
+            warn("Updating tags on $filename\n");
+        }
+        $mp3->updateTags(undef, 1);
+        if ($self->verbose) {
             print("Done.\n");
         }
     }
