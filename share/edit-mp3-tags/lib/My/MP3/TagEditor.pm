@@ -119,26 +119,26 @@ sub loadTagsFromFiles {
 
         my ($title, $track, $artist, $album, $comment, $year, $genre) = $mp3->autoinfo();
         my $albumArtist = $mp3->selectId3v2FrameByDescr("TPE2"); # "Band/orchestra/accompaniment"
-        my $tcmp         = $mp3->selectId3v2FrameByDescr("TCMP"); # iTunes Compilation Flag
-        my $tpos         = $mp3->selectId3v2FrameByDescr("TPOS"); # part of set (e.g., disc 1/2)
-        my $composer     = $mp3->composer();
-        my $performer    = $mp3->performer();
+        my $tcmp        = $mp3->selectId3v2FrameByDescr("TCMP"); # iTunes Compilation Flag
+        my $tpos        = $mp3->selectId3v2FrameByDescr("TPOS"); # part of set (e.g., disc 1/2)
+        my $composer    = $mp3->composer();
+        my $performer   = $mp3->performer();
 
         my $trackHash = {
-            track        => $track,
-            artist       => $artist,
-            title        => $title,
-            album        => $album,
-            year         => $year,
-            tpos         => $tpos,
+            track       => $track,
+            artist      => $artist,
+            title       => $title,
+            album       => $album,
+            year        => $year,
+            tpos        => $tpos,
 
-            genre        => $genre,
+            genre       => $genre,
             albumArtist => $albumArtist,
-            tcmp         => $tcmp,
-            filename     => $filename,
-            comment      => $comment,
-            composer     => $composer,
-            performer    => $performer,
+            tcmp        => $tcmp,
+            filename    => $filename,
+            comment     => $comment,
+            composer    => $composer,
+            performer   => $performer,
         };
 
         my @keys = keys %$trackHash;
@@ -380,12 +380,12 @@ sub saveTags {
 
         if ($self->verbose >= 2 || ($self->dryRun && $self->verbose)) {
             printf("%s\n", $filename);
-            printf("  TRACK        = %s\n", $track        // "");
-            printf("  ARTIST       = %s\n", $artist       // "");
-            printf("  TITLE        = %s\n", $title        // "");
-            printf("  ALBUM        = %s\n", $album        // "");
-            printf("  YEAR         = %s\n", $year         // "");
-            printf("  TPOS (DISC)  = %s\n", $tpos         // "");
+            printf("  TRACK        = %s\n", $track       // "");
+            printf("  ARTIST       = %s\n", $artist      // "");
+            printf("  TITLE        = %s\n", $title       // "");
+            printf("  ALBUM        = %s\n", $album       // "");
+            printf("  YEAR         = %s\n", $year        // "");
+            printf("  TPOS (DISC)  = %s\n", $tpos        // "");
             printf("  ALBUM_ARTIST = %s\n", $albumArtist // "");
         }
         if (!$self->dryRun) {
