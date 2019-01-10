@@ -11,21 +11,30 @@ use Text::Trim;
 use File::Which;
 use List::Util qw(max);
 
-sub new {
-    my ($class) = @_;
-    my $self = bless({}, $class);
-    return $self;
-}
+use Moo;
+
+has album                     => (is => 'rw');
+has dry_run                   => (is => 'rw', default => 0);
+has edited_tracks_by_filename => (is => 'rw', default => sub { return {}; });
+has edited_tracks             => (is => 'rw', default => sub { return []; });
+has force                     => (is => 'rw', default => 0);
+has modified                  => (is => 'rw', default => 0);
+has parse_filenames           => (is => 'rw', default => 0);
+has tempname_mtime            => (is => 'rw');
+has tempname                  => (is => 'rw');
+has tracks_by_filename        => (is => 'rw', default => sub { return {}; });
+has tracks                    => (is => 'rw', default => sub { return []; });
+has verbose                   => (is => 'rw', default => 0);
 
 sub run {
     my ($self, @filenames) = @_;
     $self->load_tags_from_files(@filenames);
-    $self->fix_track_numbers($self->{tracks});
+    $self->fix_track_numbers($self->tracks);
     $self->create_tags_file_to_edit();
     $self->edit_tags_file();
     $self->load_tags_from_tags_file();
-    $self->fix_track_numbers($self->{edited_tracks});
-    if ($self->{modified} || $self->{dry_run} || $self->{force}) {
+    $self->fix_track_numbers($self->edited_tracks);
+    if ($self->modified || $self->dry_run || $self->force) {
         $self->save_tags();
     }
 }
@@ -59,7 +68,7 @@ sub fix_track_numbers {
             $track_hash->{track} = sprintf("%d/%d", $track_hash->{track_no}, $track_hash->{track_of});
         }
         if (grep { $_->{track} ne $_->{old_track} } @{$track_array}) {
-            $self->{modified} = 1;
+            $self->modified(1);
         }
     }
 
@@ -79,13 +88,13 @@ sub fix_tpos {
                 my $new = sprintf("%d/%d", $1 + 0, $2 + 0);
                 if ($new ne $track_hash->{tpos}) {
                     $track_hash->{tpos} = $new;
-                    $self->{modified} = 1;
+                    $self->modified(1);
                 }
             } elsif ($track_hash->{tpos} =~ m{^ $RX_INTEGER $}x) {
                 my $new = $1 + 0;
                 if ($new ne $track_hash->{tpos}) {
                     $track_hash->{tpos} = $new;
-                    $self->{modified} = 1;
+                    $self->modified(1);
                 }
             }
         }
@@ -94,8 +103,8 @@ sub fix_tpos {
 
 sub load_tags_from_files {
     my ($self, @filenames) = @_;
-    $self->{tracks} = [];
-    $self->{tracks_by_filename} = {};
+    $self->tracks([]);
+    $self->tracks_by_filename({});
     foreach my $filename (@filenames) {
         next unless $filename =~ m{\.mp3$}i;
 
@@ -139,7 +148,7 @@ sub load_tags_from_files {
             }
         }
 
-        if ($self->{parse_filenames}) {
+        if ($self->parse_filenames) {
             if ($filename =~ m{^
                                (?:(\d+)(?:\s*-+\s*|\s*\.\s*|\s+))?
                                (.*?)
@@ -151,31 +160,31 @@ sub load_tags_from_files {
                 if (!is_blank($new_track)) {
                     $track_hash->{track} = $new_track;
                     $track_hash->{modified} = 1;
-                    $self->{modified} = 1;
+                    $self->modified(1);
                 }
                 if (!is_blank($new_artist)) {
                     $track_hash->{artist} = $new_artist;
                     $track_hash->{modified} = 1;
-                    $self->{modified} = 1;
+                    $self->modified(1);
                 }
                 if (!is_blank($new_title)) {
                     $track_hash->{title} = $new_title;
                     $track_hash->{modified} = 1;
-                    $self->{modified} = 1;
+                    $self->modified(1);
                 }
             }
         }
 
-        push(@{$self->{tracks}}, $track_hash);
-        $self->{tracks_by_filename}->{$filename} = $track_hash;
+        push(@{$self->tracks}, $track_hash);
+        $self->tracks_by_filename->{$filename} = $track_hash;
     }
 }
 
 sub create_tags_file_to_edit {
     my ($self, @filenames) = @_;
-    if (scalar @{$self->{tracks}}) {
+    if (scalar @{$self->tracks}) {
         my ($fh, $tempname) = tempfile();
-        $self->{tempname} = $tempname;
+        $self->tempname($tempname);
         print $fh <<"EOF";
 # Lines starting with '#' are ignored.
 
@@ -194,10 +203,10 @@ sub create_tags_file_to_edit {
 # Blank out this file to cancel all changes.
 
 EOF
-        my $show_tpos = grep { !is_blank($_->{tpos}) } @{$self->{tracks}};
+        my $show_tpos = grep { !is_blank($_->{tpos}) } @{$self->tracks};
         my %column_widths = ();
         foreach my $column (qw(artist title album year album_artist)) {
-            my @lengths = map { length($_) } grep { defined $_ } map { $_->{$column} } @{$self->{tracks}};
+            my @lengths = map { length($_) } grep { defined $_ } map { $_->{$column} } @{$self->tracks};
             if (scalar @lengths) {
                 $column_widths{$column} = max @lengths;
             } else {
@@ -206,7 +215,7 @@ EOF
         }
         my $extra_space = 2;
 
-        foreach my $track (@{$self->{tracks}}) {
+        foreach my $track (@{$self->tracks}) {
             printf $fh ("%7s: ",              $track->{tpos} // "") if $show_tpos;
             printf $fh ("%7s. ",              $track->{track} // "");
             printf $fh ("artist=%-*s",        $extra_space + $column_widths{artist},       $track->{artist}       // "");
@@ -217,7 +226,7 @@ EOF
             printf $fh ("|filename=%s",       $track->{filename} // "");
             print  $fh "\n";
         }
-        $self->{tempname_mtime} = (stat($tempname))[9];
+        $self->tempname_mtime((stat($tempname))[9]);
     } else {
         warn("No tracks.  Exiting.\n");
         exit(0);
@@ -234,17 +243,17 @@ sub edit_tags_file {
                 "you don't have nano, pico, or vi.\n");
     }
     my @editor = shellwords($editor);
-    my $result = system(@editor, $self->{tempname});
-    my $mtime = (stat($self->{tempname}))[9];
+    my $result = system(@editor, $self->tempname);
+    my $mtime = (stat($self->tempname))[9];
     if ($result) {
         $self->editor_failed();
     } else {
-        if ($mtime != $self->{tempname_mtime}) {
-            $self->{modified} = 1;
+        if ($mtime != $self->tempname_mtime) {
+            $self->modified(1);
         }
     }
-    if (!$self->{modified}) {
-        if (!$self->{force} && !$self->{dry_run}) {
+    if (!$self->modified) {
+        if (!$self->force && !$self->dry_run) {
             $self->not_modified();
         }
     }
@@ -253,27 +262,27 @@ sub edit_tags_file {
 sub editor_failed {
     my ($self) = @_;
     warn("Editor failed.  Exiting.\n");
-    unlink($self->{tempname});
+    unlink($self->tempname);
     exit(1);
 }
 
 sub not_modified {
     my ($self) = @_;
     warn("Not modified.  Exiting.\n");
-    unlink($self->{tempname});
+    unlink($self->tempname);
     exit(0);
 }
 
 sub load_tags_from_tags_file {
     my ($self) = @_;
-    my $tempname = $self->{tempname};
+    my $tempname = $self->tempname;
     my $fh;
     open($fh, "<", $tempname) or die("Cannot read $tempname: $!\n");
-    $self->{album} = {};
+    $self->album({});
     my $last_line_album = 0;
     my $last_line_track = 0;
-    $self->{edited_tracks} = [];
-    $self->{edited_tracks_by_filename} = {};
+    $self->edited_tracks([]);
+    $self->edited_tracks_by_filename({});
     local $. = 0;
     while (<$fh>) {
         next if m{^\s*\#};      # ignore comments;
@@ -282,7 +291,7 @@ sub load_tags_from_tags_file {
 
         if (!m{\|}) {
             if (!$last_line_album) {
-                $self->{album} = {};
+                $self->album({});
             }
             s{^\s+}{};
             s{\s+$}{};
@@ -290,13 +299,13 @@ sub load_tags_from_tags_file {
                 my ($key, $value) = ($`, $');
                 $key =~ s{-+}{_}g;
                 if (is_blank($value)) {
-                    delete $self->{album}->{$key};
+                    delete $self->album->{$key};
                 } else {
-                    $self->{album}->{$key} = $value;
+                    $self->album->{$key} = $value;
                 }
             } else {
                 s{-+}{_}g;
-                $self->{album}->{$_} = 1;
+                $self->album->{$_} = 1;
             }
             $last_line_album = 1;
             $last_line_track = 0;
@@ -326,9 +335,9 @@ sub load_tags_from_tags_file {
                 $track_hash->{$_} = 1;
             }
         }
-        push(@{$self->{edited_tracks}}, $track_hash);
-        $self->{edited_tracks_by_filename}->{$track_hash->{filename}} = $track_hash;
-        if ($self->{verbose} >= 3) {
+        push(@{$self->edited_tracks}, $track_hash);
+        $self->edited_tracks_by_filename->{$track_hash->{filename}} = $track_hash;
+        if ($self->verbose >= 3) {
             warn Dumper($track_hash);
         }
 
@@ -340,7 +349,7 @@ sub load_tags_from_tags_file {
 sub save_tags {
     my ($self) = @_;
 
-    foreach my $track_hash (@{$self->{edited_tracks}}) {
+    foreach my $track_hash (@{$self->edited_tracks}) {
         my $filename = $track_hash->{filename};
         if (is_blank($filename)) {
             warn("No filename on $filename line $.\n");
@@ -348,14 +357,14 @@ sub save_tags {
         }
 
         my $track    = $track_hash->{track};
-        my $artist   = $self->{album}->{artist} // $track_hash->{artist};
+        my $artist   = $self->album->{artist} // $track_hash->{artist};
         my $title    = $track_hash->{title};
-        my $album    = $self->{album}->{album}  // $track_hash->{album};
-        my $year     = $self->{album}->{year}   // $track_hash->{year};
+        my $album    = $self->album->{album}  // $track_hash->{album};
+        my $year     = $self->album->{year}   // $track_hash->{year};
         my $tpos     = $track_hash->{tpos};
 
         my $album_artist;
-        if ($self->{album}->{various_artists}) {
+        if ($self->album->{various_artists}) {
             $album_artist = $artist;
             $artist = "Various Artists";
         }
@@ -369,7 +378,7 @@ sub save_tags {
         $mp3->config("prohibit_v24" => 0);
         $mp3->config("write_v24" => 1);
 
-        if ($self->{verbose} >= 2 || ($self->{dry_run} && $self->{verbose})) {
+        if ($self->verbose >= 2 || ($self->dry_run && $self->verbose)) {
             printf("%s\n", $filename);
             printf("  TRACK        = %s\n", $track        // "");
             printf("  ARTIST       = %s\n", $artist       // "");
@@ -379,26 +388,26 @@ sub save_tags {
             printf("  TPOS (DISC)  = %s\n", $tpos         // "");
             printf("  ALBUM_ARTIST = %s\n", $album_artist // "");
         }
-        if (!$self->{dry_run}) {
+        if (!$self->dry_run) {
             $mp3->title_set($title // "", 1);
             $mp3->artist_set($artist // "", 1);
             $mp3->year_set($year // "", 1);
             $mp3->album_set($album // "", 1);
             $mp3->track_set($track // "", 1);
             $mp3->select_id3v2_frame_by_descr("TPOS", $tpos // "");
-            if ($self->{album}->{various_artists}) {
+            if ($self->album->{various_artists}) {
                 $mp3->select_id3v2_frame_by_descr("TPE2", $album_artist);
                 $mp3->select_id3v2_frame_by_descr("TCMP", "1");
             } else {
                 $mp3->select_id3v2_frame_by_descr("TPE2", ''); # not undef
                 $mp3->select_id3v2_frame_by_descr("TCMP", undef);
             }
-            if ($self->{verbose}) {
+            if ($self->verbose) {
                 warn("Updating tags on $filename\n");
             }
             $mp3->update_tags(undef, 1);
         }
-        if ($self->{verbose} && !$self->{dry_run}) {
+        if ($self->verbose && !$self->dry_run) {
             print("Done.\n");
         }
     }

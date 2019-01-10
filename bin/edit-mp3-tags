@@ -39,10 +39,10 @@ END
 
 if (scalar(@ARGV)) {
     my $editor = My::MP3::TagEditor->new();
-    $editor->{verbose}         = $verbose;
-    $editor->{dry_run}         = $dry_run;
-    $editor->{parse_filenames} = $parse_filenames;
-    $editor->{force}           = $force;
+    $editor->verbose($verbose);
+    $editor->dry_run($dry_run);
+    $editor->parse_filenames($parse_filenames);
+    $editor->force($force);
     $editor->run(@ARGV);
 } else {
     warn("No files specified.  Exiting.");
