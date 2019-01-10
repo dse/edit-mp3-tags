@@ -104,7 +104,9 @@ sub loadTagsFromFiles {
     my ($self, @filenames) = @_;
     $self->tracks([]);
     $self->tracksByFilename({});
+    my $origIndex = 0;
     foreach my $filename (@filenames) {
+        $origIndex += 1;
         next unless $filename =~ m{\.mp3$}i;
 
         my $mp3 = MP3::Tag->new($filename);
@@ -122,6 +124,9 @@ sub loadTagsFromFiles {
         my $composer    = $mp3->composer();
         my $performer   = $mp3->performer();
 
+        my $dirname  = dirname($filename);
+        my $basename = basename($filename);
+
         my $trackHash = {
             track       => $track,
             artist      => $artist,
@@ -129,7 +134,6 @@ sub loadTagsFromFiles {
             album       => $album,
             year        => $year,
             tpos        => $tpos,
-
             genre       => $genre,
             albumArtist => $albumArtist,
             tcmp        => $tcmp,
@@ -137,6 +141,9 @@ sub loadTagsFromFiles {
             comment     => $comment,
             composer    => $composer,
             performer   => $performer,
+            dirname     => $dirname,
+            basename    => $basename,
+            origIndex   => $origIndex,
         };
 
         my @keys = keys %$trackHash;
@@ -176,6 +183,10 @@ sub loadTagsFromFiles {
         push(@{$self->tracks}, $trackHash);
         $self->tracksByFilename->{$filename} = $trackHash;
     }
+
+    @{$self->tracks} = sort {
+        ($a->{dirname} cmp $b->{dirname}) || ($a->{origIndex} <=> $b->{origIndex})
+    } @{$self->tracks};
 }
 
 sub createTagsFileToEdit {
@@ -183,7 +194,12 @@ sub createTagsFileToEdit {
     if (scalar @{$self->tracks}) {
         my ($fh, $tempname) = tempfile();
         $self->tempname($tempname);
-        print $fh <<"EOF";
+
+        my @dirname = map { $_->{dirname} } @{$self->tracks};
+        my %dirname = map { ($_, 1) } @dirname;
+        my $isInMultipleDirectories = scalar keys %dirname == 1;
+
+        print $fh <<"EOF" if !$isInMultipleDirectories;
 # Lines starting with '#' are ignored.
 
 # Un-comment the following line for various-artists compilations.
@@ -193,6 +209,24 @@ sub createTagsFileToEdit {
 #artist=<artist>
 #album=<album>
 #year=<year>
+
+# For multi-disc sets, prefix each line with:       1/2:   (optional)
+# Then if you need to fix track numbers manually:   1/10.
+
+# Make changes, save, and exit your editor to effect your changes.
+# Blank out this file to cancel all changes.
+
+EOF
+        print $fh <<"EOF" if $isInMultipleDirectories;
+# Lines starting with '#' are ignored.
+
+# Un-comment lines like the following for various-artists compilations.
+#     #various-artists
+
+# Un-comment and edit lines like the following for albums.
+#     #artist=<artist>
+#     #album=<album>
+#     #year=<year>
 
 # For multi-disc sets, prefix each line with:       1/2:   (optional)
 # Then if you need to fix track numbers manually:   1/10.
@@ -213,7 +247,20 @@ EOF
         }
         my $extraSpace = 2;
 
+        my $previousDirname;
         foreach my $track (@{$self->tracks}) {
+            my $dirname = $track->{dirname};
+            if ($isInMultipleDirectories) {
+                if (!defined $dirname || $dirname ne $previousDirname) {
+                    print $fh "\n";
+                    print $fh "[album]\n";
+                    print $fh "#various-artists\n";
+                    print $fh "#artist=<artist>\n";
+                    print $fh "#album=<album>\n";
+                    print $fh "#year=<year>\n";
+                    print $fh "\n";
+                }
+            }
             printf $fh ("%7s: ",              $track->{tpos} // "") if $showTpos;
             printf $fh ("%7s. ",              $track->{track} // "");
             printf $fh ("artist=%-*s",        $extraSpace + $columnWidths{artist},       $track->{artist}       // "");
@@ -287,6 +334,13 @@ sub loadTagsFromTagsFile {
         s{\R\z}{};              # safer chomp
         next unless m{\S};      # skip blank lines
 
+        if (m{^\s*\[\s*album\s*]\s*$}i) {
+            $album = {};
+            $lastLineAlbum = 1;
+            $lastLineTrack = 0;
+            next;
+        }
+
         if (!m{\|}) {
             if (!$lastLineAlbum) {
                 $album = {};
@@ -309,6 +363,7 @@ sub loadTagsFromTagsFile {
             $lastLineTrack = 0;
             next;
         }
+
         my $trackHash = {};
 
         if (s{^ ($RX_INTEGER_OF_INTEGER|$RX_INTEGER) \: \s* }{}x) {
