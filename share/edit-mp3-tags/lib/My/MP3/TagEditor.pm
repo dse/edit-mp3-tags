@@ -13,18 +13,18 @@ use List::Util qw(max);
 
 use Moo;
 
-has album                     => (is => 'rw');
-has dryRun                   => (is => 'rw', default => 0);
+has album                  => (is => 'rw');
+has dryRun                 => (is => 'rw', default => 0);
 has editedTracksByFilename => (is => 'rw', default => sub { return {}; });
-has editedTracks             => (is => 'rw', default => sub { return []; });
-has force                     => (is => 'rw', default => 0);
-has modified                  => (is => 'rw', default => 0);
-has parseFilenames           => (is => 'rw', default => 0);
-has tempnameMtime            => (is => 'rw');
-has tempname                  => (is => 'rw');
-has tracksByFilename        => (is => 'rw', default => sub { return {}; });
-has tracks                    => (is => 'rw', default => sub { return []; });
-has verbose                   => (is => 'rw', default => 0);
+has editedTracks           => (is => 'rw', default => sub { return []; });
+has force                  => (is => 'rw', default => 0);
+has modified               => (is => 'rw', default => 0);
+has parseFilenames         => (is => 'rw', default => 0);
+has tempnameMtime          => (is => 'rw');
+has tempname               => (is => 'rw');
+has tracksByFilename       => (is => 'rw', default => sub { return {}; });
+has tracks                 => (is => 'rw', default => sub { return []; });
+has verbose                => (is => 'rw', default => 0);
 
 sub run {
     my ($self, @filenames) = @_;
