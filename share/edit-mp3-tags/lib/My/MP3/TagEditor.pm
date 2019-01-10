@@ -114,13 +114,13 @@ sub loadTagsFromFiles {
             warn("edit-mp3-tags: could not read tags for $filename\n");
             next;
         }
-        $mp3->config("prohibitV24" => 0);
-        $mp3->config("writeV24" => 1);
+        $mp3->config("prohibit_v24" => 0);
+        $mp3->config("write_v24" => 1);
 
         my ($title, $track, $artist, $album, $comment, $year, $genre) = $mp3->autoinfo();
-        my $albumArtist = $mp3->selectId3v2FrameByDescr("TPE2"); # "Band/orchestra/accompaniment"
-        my $tcmp        = $mp3->selectId3v2FrameByDescr("TCMP"); # iTunes Compilation Flag
-        my $tpos        = $mp3->selectId3v2FrameByDescr("TPOS"); # part of set (e.g., disc 1/2)
+        my $albumArtist = $mp3->select_id3v2_frame_by_descr("TPE2"); # "Band/orchestra/accompaniment"
+        my $tcmp        = $mp3->select_id3v2_frame_by_descr("TCMP"); # iTunes Compilation Flag
+        my $tpos        = $mp3->select_id3v2_frame_by_descr("TPOS"); # part of set (e.g., disc 1/2)
         my $composer    = $mp3->composer();
         my $performer   = $mp3->performer();
 
@@ -422,7 +422,7 @@ sub saveTags {
         my $tpos   = $trackHash->{tpos};
 
         my $albumArtist;
-        if ($self->album->{variousArtists}) {
+        if ($self->album->{various_artists}) {
             $albumArtist = $artist;
             $artist = "Various Artists";
         }
@@ -446,26 +446,26 @@ sub saveTags {
             warn("edit-mp3-tags: could not read tags for $filename\n");
             next;
         }
-        $mp3->config("prohibitV24" => 0);
-        $mp3->config("writeV24" => 1);
+        $mp3->config("prohibit_v24" => 0);
+        $mp3->config("write_v24" => 1);
 
-        $mp3->titleSet($title // "", 1);
-        $mp3->artistSet($artist // "", 1);
-        $mp3->yearSet($year // "", 1);
-        $mp3->albumSet($album // "", 1);
-        $mp3->trackSet($track // "", 1);
-        $mp3->selectId3v2FrameByDescr("TPOS", $tpos // "");
-        if ($self->album->{variousArtists}) {
-            $mp3->selectId3v2FrameByDescr("TPE2", $albumArtist);
-            $mp3->selectId3v2FrameByDescr("TCMP", "1");
+        $mp3->title_set($title // "", 1);
+        $mp3->artist_set($artist // "", 1);
+        $mp3->year_set($year // "", 1);
+        $mp3->album_set($album // "", 1);
+        $mp3->track_set($track // "", 1);
+        $mp3->select_id3v2_frame_by_descr("TPOS", $tpos // "");
+        if ($self->album->{various_artists}) {
+            $mp3->select_id3v2_frame_by_descr("TPE2", $albumArtist);
+            $mp3->select_id3v2_frame_by_descr("TCMP", "1");
         } else {
-            $mp3->selectId3v2FrameByDescr("TPE2", ''); # not undef
-            $mp3->selectId3v2FrameByDescr("TCMP", undef);
+            $mp3->select_id3v2_frame_by_descr("TPE2", ''); # not undef
+            $mp3->select_id3v2_frame_by_descr("TCMP", undef);
         }
         if ($self->verbose) {
             warn("Updating tags on $filename\n");
         }
-        $mp3->updateTags(undef, 1);
+        $mp3->update_tags(undef, 1);
         if ($self->verbose) {
             print("Done.\n");
         }
