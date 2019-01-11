@@ -86,13 +86,14 @@ sub fixTrackNumbers {
         my %tracksByDiscNo;
 
         foreach my $trackHash (@$trackArray) {
-            my $discNo = $_->{discNo} || 1;
+            my $discNo = $trackHash->{discNo} || 1;
+            warn $discNo;
             push(@{$tracksByDiscNo{$discNo}}, $trackHash);
         }
 
-        if ($self->tracksAreFromMultipleDiscs()) {
+        if ($self->tracksAreFromMultipleDiscs(@$trackArray)) {
             foreach my $trackHash (@$trackArray) {
-                $_->{discNo} ||= 1;
+                $trackHash->{discNo} ||= 1;
             }
         }
 
@@ -237,7 +238,7 @@ sub createTagsFileToEdit {
 # Lines starting with '#' are ignored.
 
 # Un-comment and edit any of the following line(s) for albums.
-#album-artist=Various Artists
+#albumArtist=Various Artists
 #artist=<artist>
 #album=<album>
 #year=<year>
@@ -253,7 +254,7 @@ EOF
 # Lines starting with '#' are ignored.
 
 # Un-comment and edit lines like the following for albums.
-#     #album-artist=Various Artists
+#     #albumArtist=Various Artists
 #     #artist=<artist>
 #     #album=<album>
 #     #year=<year>
@@ -288,7 +289,7 @@ EOF
             if ($hasMultipleDirectories) {
                 print $fh "\n";
                 print $fh "[album]\n";
-                print $fh "#album-artist=Various Artists\n";
+                print $fh "#albumArtist=Various Artists\n";
                 print $fh "#artist=<artist>\n";
                 print $fh "#album=<album>\n";
                 print $fh "#year=<year>\n";
@@ -296,14 +297,14 @@ EOF
             }
 
             foreach my $trackHash (@trackArray) {
-                printf $fh ("%7s: ",              $trackHash->{tpos} // "") if $showTpos;
-                printf $fh ("%7s. ",              $trackHash->{track} // "");
-                printf $fh ("artist=%-*s",        $extraSpace + $columnWidths{artist},      $trackHash->{artist}      // "");
-                printf $fh ("|title=%-*s",        $extraSpace + $columnWidths{title},       $trackHash->{title}       // "");
-                printf $fh ("|album=%-*s",        $extraSpace + $columnWidths{album},       $trackHash->{album}       // "");
-                printf $fh ("|year=%-*s",         $extraSpace + $columnWidths{year},        $trackHash->{year}        // "");
-                printf $fh ("|album-artist=%-*s", $extraSpace + $columnWidths{albumArtist}, $trackHash->{albumArtist} // "");
-                printf $fh ("|filename=%s",       $trackHash->{filename} // "");
+                printf $fh ("%7s: ",             $trackHash->{tpos} // "") if $showTpos;
+                printf $fh ("%7s. ",             $trackHash->{track} // "");
+                printf $fh ("artist=%-*s",       $extraSpace + $columnWidths{artist},      $trackHash->{artist}      // "");
+                printf $fh ("|title=%-*s",       $extraSpace + $columnWidths{title},       $trackHash->{title}       // "");
+                printf $fh ("|album=%-*s",       $extraSpace + $columnWidths{album},       $trackHash->{album}       // "");
+                printf $fh ("|year=%-*s",        $extraSpace + $columnWidths{year},        $trackHash->{year}        // "");
+                printf $fh ("|albumArtist=%-*s", $extraSpace + $columnWidths{albumArtist}, $trackHash->{albumArtist} // "");
+                printf $fh ("|filename=%s",      $trackHash->{filename} // "");
                 print  $fh "\n";
             }
         }
@@ -461,7 +462,7 @@ sub saveTags {
         # my $album       = $trackHash->{album};
         # my $year        = $trackHash->{year};
         # my $tpos        = $trackHash->{tpos};
-        # my $albumArtist = $trackHash->{album_artist};
+        # my $albumArtist = $trackHash->{albumArtist};
 
         if ($self->verbose >= 2 || ($self->dryRun && $self->verbose)) {
             printf("%s\n", $filename);
