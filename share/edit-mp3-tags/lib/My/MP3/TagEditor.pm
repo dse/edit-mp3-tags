@@ -9,8 +9,9 @@ use Data::Dumper;
 use Text::ParseWords;
 use Text::Trim;
 use File::Which;
-use List::Util qw(max min uniq);
+use List::Util qw(max min uniq all none);
 use File::Basename qw(dirname basename);
+use POSIX qw(floor);
 
 use Moo;
 
@@ -68,55 +69,63 @@ sub fixTrackNumbers {
         push(@{$trackArrayByDirname{$dirname}}, $trackHash);
     }
 
+    $self->extractDiscNumbersFromTags(@$allTracksArray);
+    $self->extractTrackNumbersFromTags(@$allTracksArray);
+
     foreach my $dirname (sort keys %trackArrayByDirname) {
         my $trackArray = $trackArrayByDirname{$dirname};
 
-        # populate track numbers from track number fields
-        foreach my $trackHash (@{$trackArray}) {
-            my $track = $trackHash->{track};
-            if (defined $track && $track =~ m{^ $RX_INTEGER_OF_INTEGER $}x) {
-                $trackHash->{trackNo} = $1 + 0;
-                $trackHash->{trackOf} = $2 + 0;
-            } elsif (defined $track && $track =~ m{^ $RX_INTEGER $}x) {
-                $trackHash->{trackNo} = $1 + 0;
-                $trackHash->{trackOf} = undef;
+        if (!$self->noTracksHaveTrackNumbers(@$trackArray)) {
+            $self->extractTrackNumbersFromFilenames(@$trackArray);
+        }
+
+        if ($self->trackNumbersAreFromMultiDiscSet(@$trackArray)) {
+            $self->fixMultiDiscSetTrackNumbers(@$trackArray);
+        }
+
+        my %tracksByDiscNo;
+
+        foreach my $trackHash (@$trackArray) {
+            my $discNo = $_->{discNo} || 1;
+            push(@{$tracksByDiscNo{$discNo}}, $trackHash);
+        }
+
+        if ($self->tracksAreFromMultipleDiscs()) {
+            foreach my $trackHash (@$trackArray) {
+                $_->{discNo} ||= 1;
             }
         }
 
-        # if no track number fields found, extract from filenames
-        if (!grep { defined $_->{trackNo} } @{$trackArray}) {
-            my @trackNumbers = $self->findTrackNumbersInFilenames(@{$trackArray});
-            if (scalar @trackNumbers == scalar @{$trackArray}) {
-                for (my $i = 0; $i < scalar @trackNumbers; $i += 1) {
-                    $trackArray->[$i]->{trackNo} = $trackNumbers[$i];
+        foreach my $discNo (sort { $a <=> $b } keys %tracksByDiscNo) {
+            my @discTrackArray = @{$tracksByDiscNo{$discNo}};
+
+            my $sortedTrackNumbers = join(",", sort { $a <=> $b } map { $_->{trackNo} // 0 } @discTrackArray);
+            my $checkTrackNumbers  = join(",", 1 .. scalar(@discTrackArray));
+            if ($sortedTrackNumbers eq $checkTrackNumbers) {
+                @discTrackArray = sort { $a->{trackNo} <=> $b->{trackNo} } @discTrackArray;
+                foreach my $trackHash (@discTrackArray) {
+                    $trackHash->{trackOf} = scalar(@discTrackArray);
+                    $trackHash->{oldTrack} = $trackHash->{track};
+                    $trackHash->{track} = sprintf("%d/%d", $trackHash->{trackNo}, $trackHash->{trackOf});
                 }
-            }
-        }
-
-        # if track numbers are 1 to <total> where <total> is the
-        # number of tracks, make sure all tracks are <n>/<total>.
-        my $sortedTrackNumbers = join(",", sort { $a <=> $b } map { $_->{trackNo} // 0 } @{$trackArray});
-        my $checkTrackNumbers  = join(",", 1 .. scalar(@{$trackArray}));
-        if ($sortedTrackNumbers eq $checkTrackNumbers) {
-            @{$trackArray} = sort { $a->{trackNo} <=> $b->{trackNo} } @{$trackArray};
-            foreach my $trackHash (@{$trackArray}) {
-                $trackHash->{trackOf} = scalar(@{$trackArray});
-                $trackHash->{oldTrack} = $trackHash->{track};
-                $trackHash->{track} = sprintf("%d/%d", $trackHash->{trackNo}, $trackHash->{trackOf});
-            }
-            if (grep { ($_->{track} // "") ne ($_->{oldTrack} // "") } @{$trackArray}) {
-                $self->modified(1);
+                if (grep { ($_->{track} // "") ne ($_->{oldTrack} // "") } @discTrackArray) {
+                    $self->modified(1);
+                }
             }
         }
     }
 }
 
 sub findTrackNumbersInFilenames {
-    my ($self, @tracks) = @_;
-    return unless scalar @tracks >= 2;
-    my $prefix = $self->findCommonPrefix(map { $_->{basename} } @tracks);
+    my ($self, @trackArray) = @_;
+    if (scalar @trackArray == 1 && ref $trackArray[0] eq 'ARRAY') {
+        @trackArray = @{$trackArray[0]};
+    }
+
+    return unless scalar @trackArray >= 2;
+    my $prefix = $self->findCommonPrefix(map { $_->{basename} } @trackArray);
     return if length $prefix <= 0;
-    my @theRest = map { substr($_->{basename}, length $prefix) } @tracks;
+    my @theRest = map { substr($_->{basename}, length $prefix) } @trackArray;
     my @trackNumbers = $self->getTrackNumbersIfAll(@theRest);
     return @trackNumbers;
 }
@@ -142,27 +151,6 @@ sub getTrackNumbersIfAll {
     my @numbers = map { $_ =~ m{^\d+} ? ($& + 0) : undef } @strings;
     return @numbers if !grep { !defined $_ } @numbers;
     return;
-}
-
-sub fixTpos {
-    my ($self, $trackArray) = @_;
-    foreach my $trackHash (@{$trackArray}) {
-        if (defined $trackHash->{tpos}) {
-            if ($trackHash->{tpos} =~ m{^ $RX_INTEGER_OF_INTEGER $}x) {
-                my $new = sprintf("%d/%d", $1 + 0, $2 + 0);
-                if ($new ne $trackHash->{tpos}) {
-                    $trackHash->{tpos} = $new;
-                    $self->modified(1);
-                }
-            } elsif ($trackHash->{tpos} =~ m{^ $RX_INTEGER $}x) {
-                my $new = $1 + 0;
-                if ($new ne $trackHash->{tpos}) {
-                    $trackHash->{tpos} = $new;
-                    $self->modified(1);
-                }
-            }
-        }
-    }
 }
 
 sub loadTagsFromFiles {
@@ -231,7 +219,8 @@ sub sortTracks {
     my ($self, $array) = @_;
     @$array = sort {
         ($a->{dirname} cmp $b->{dirname}) ||
-            ($a->{trackNo} <=> $b->{trackNo}) ||
+            (($a->{discNo} || 1) <=> ($b->{discNo} || 1)) ||
+            (($a->{trackNo} // 0) <=> ($b->{trackNo} // 0)) ||
             ($a->{origIndex} <=> $b->{origIndex})
     } @$array;
 }
@@ -276,43 +265,49 @@ EOF
 # Blank out this file to cancel all changes.
 
 EOF
-        my $showTpos = grep { !isBlank($_->{tpos}) } @{$self->tracks};
-        my %columnWidths = ();
-        foreach my $column (qw(artist title album year albumArtist)) {
-            my @lengths = map { length($_) } grep { defined $_ } map { $_->{$column} } @{$self->tracks};
-            if (scalar @lengths) {
-                $columnWidths{$column} = max @lengths;
-            } else {
-                $columnWidths{$column} = 0;
-            }
-        }
-        my $extraSpace = 2;
 
-        my $previousDirname;
-        foreach my $track (@{$self->tracks}) {
-            my $dirname = $track->{dirname};
-            if ($hasMultipleDirectories) {
-                if (!defined $previousDirname || $dirname ne $previousDirname) {
-                    print $fh "\n";
-                    print $fh "[album]\n";
-                    print $fh "#album-artist=Various Artists\n";
-                    print $fh "#artist=<artist>\n";
-                    print $fh "#album=<album>\n";
-                    print $fh "#year=<year>\n";
-                    print $fh "\n";
+        my @dirname = map { $_->{dirname} } @{$self->tracks};
+        my %dirname = map { ($_, 1) } @dirname;
+        @dirname = sort keys %dirname;
+
+        foreach my $dirname (@dirname) {
+            my @trackArray = grep { $_->{dirname} eq $dirname } @{$self->tracks};
+
+            my $showTpos = grep { !isBlank($_->{tpos}) } @trackArray;
+            my %columnWidths = ();
+            foreach my $column (qw(artist title album year albumArtist)) {
+                my @lengths = map { length($_) } grep { defined $_ } map { $_->{$column} } @trackArray;
+                if (scalar @lengths) {
+                    $columnWidths{$column} = max @lengths;
+                } else {
+                    $columnWidths{$column} = 0;
                 }
-                $previousDirname = $dirname;
             }
-            printf $fh ("%7s: ",              $track->{tpos} // "") if $showTpos;
-            printf $fh ("%7s. ",              $track->{track} // "");
-            printf $fh ("artist=%-*s",        $extraSpace + $columnWidths{artist},      $track->{artist}      // "");
-            printf $fh ("|title=%-*s",        $extraSpace + $columnWidths{title},       $track->{title}       // "");
-            printf $fh ("|album=%-*s",        $extraSpace + $columnWidths{album},       $track->{album}       // "");
-            printf $fh ("|year=%-*s",         $extraSpace + $columnWidths{year},        $track->{year}        // "");
-            printf $fh ("|album-artist=%-*s", $extraSpace + $columnWidths{albumArtist}, $track->{albumArtist} // "");
-            printf $fh ("|filename=%s",       $track->{filename} // "");
-            print  $fh "\n";
+            my $extraSpace = 2;
+
+            if ($hasMultipleDirectories) {
+                print $fh "\n";
+                print $fh "[album]\n";
+                print $fh "#album-artist=Various Artists\n";
+                print $fh "#artist=<artist>\n";
+                print $fh "#album=<album>\n";
+                print $fh "#year=<year>\n";
+                print $fh "\n";
+            }
+
+            foreach my $trackHash (@trackArray) {
+                printf $fh ("%7s: ",              $trackHash->{tpos} // "") if $showTpos;
+                printf $fh ("%7s. ",              $trackHash->{track} // "");
+                printf $fh ("artist=%-*s",        $extraSpace + $columnWidths{artist},      $trackHash->{artist}      // "");
+                printf $fh ("|title=%-*s",        $extraSpace + $columnWidths{title},       $trackHash->{title}       // "");
+                printf $fh ("|album=%-*s",        $extraSpace + $columnWidths{album},       $trackHash->{album}       // "");
+                printf $fh ("|year=%-*s",         $extraSpace + $columnWidths{year},        $trackHash->{year}        // "");
+                printf $fh ("|album-artist=%-*s", $extraSpace + $columnWidths{albumArtist}, $trackHash->{albumArtist} // "");
+                printf $fh ("|filename=%s",       $trackHash->{filename} // "");
+                print  $fh "\n";
+            }
         }
+
         $self->tempnameMtime((stat($tempname))[9]);
     } else {
         warn("No tracks.  Exiting.\n");
@@ -556,6 +551,115 @@ sub isBlank {
     return 1 if !defined $string;
     return 1 if $string !~ m{\S};
     return 0;
+}
+
+sub extractTrackNumbersFromTags {
+    my ($self, @trackArray) = @_;
+    if (scalar @trackArray == 1 && ref $trackArray[0] eq 'ARRAY') {
+        @trackArray = @{$trackArray[0]};
+    }
+
+    foreach my $trackHash (@trackArray) {
+        my $track = $trackHash->{track};
+        if (defined $track && $track =~ m{^ $RX_INTEGER_OF_INTEGER $}x) {
+            $trackHash->{trackNo} = $1 + 0;
+            $trackHash->{trackOf} = $2 + 0;
+        } elsif (defined $track && $track =~ m{^ $RX_INTEGER $}x) {
+            $trackHash->{trackNo} = $1 + 0;
+            $trackHash->{trackOf} = undef;
+        }
+    }
+}
+
+sub extractDiscNumbersFromTags {
+    my ($self, @trackArray) = @_;
+    if (scalar @trackArray == 1 && ref $trackArray[0] eq 'ARRAY') {
+        @trackArray = @{$trackArray[0]};
+    }
+
+    foreach my $trackHash (@trackArray) {
+        my $tpos = $trackHash->{tpos};
+        if (defined $tpos && $tpos =~ m{^ $RX_INTEGER_OF_INTEGER $}x) {
+            my ($discNo, $discOf) = ($1 + 0, $2 + 0);
+            $trackHash->{discNo} = $discNo;
+            $trackHash->{discOf} = $discOf;
+        } elsif (defined $tpos && $tpos =~ m{^ $RX_INTEGER $}x) {
+            my ($discNo) = ($1 + 0);
+            $trackHash->{discNo} = $discNo;
+            $trackHash->{discOf} = undef;
+        }
+    }
+}
+
+sub noTracksHaveTrackNumbers {
+    my ($self, @trackArray) = @_;
+    if (scalar @trackArray == 1 && ref $trackArray[0] eq 'ARRAY') {
+        @trackArray = @{$trackArray[0]};
+    }
+
+    return none { defined $_->{trackNo} } @trackArray;
+}
+
+sub allTracksHaveTrackNumbers {
+    my ($self, @trackArray) = @_;
+    if (scalar @trackArray == 1 && ref $trackArray[0] eq 'ARRAY') {
+        @trackArray = @{$trackArray[0]};
+    }
+
+    return all { defined $_->{trackNo} } @trackArray;
+}
+
+sub extractTrackNumbersFromFilenames {
+    my ($self, @trackArray) = @_;
+    if (scalar @trackArray == 1 && ref $trackArray[0] eq 'ARRAY') {
+        @trackArray = @{$trackArray[0]};
+    }
+
+    my @trackNumbers = $self->findTrackNumbersInFilenames(@trackArray);
+    if (scalar @trackNumbers == scalar @trackArray) {
+        for (my $i = 0; $i < scalar @trackNumbers; $i += 1) {
+            $trackArray[$i]->{trackNo} = $trackNumbers[$i];
+        }
+    }
+}
+
+sub trackNumbersAreFromMultiDiscSet {
+    my ($self, @trackArray) = @_;
+    if (scalar @trackArray == 1 && ref $trackArray[0] eq 'ARRAY') {
+        @trackArray = @{$trackArray[0]};
+    }
+
+    return all {
+        ($_->{discNo} && $_->{discNo} > 0) ||
+        (!$_->{discNo} && $_->{trackNo} >= 100)
+    } @trackArray;
+}
+
+sub fixMultiDiscSetTrackNumbers {
+    my ($self, @trackArray) = @_;
+    if (scalar @trackArray == 1 && ref $trackArray[0] eq 'ARRAY') {
+        @trackArray = @{$trackArray[0]};
+    }
+
+    foreach my $trackHash (@trackArray) {
+        my $discNo  = $trackHash->{discNo};
+        my $trackNo = $trackHash->{trackNo};
+        if (!$discNo && $trackNo >= 100) {
+            $trackHash->{discNo}  = floor($trackNo / 100);
+            $trackHash->{trackNo} = $trackNo % 100;
+        }
+    }
+}
+
+sub tracksAreFromMultipleDiscs {
+    my ($self, @trackArray) = @_;
+    if (scalar @trackArray == 1 && ref $trackArray[0] eq 'ARRAY') {
+        @trackArray = @{$trackArray[0]};
+    }
+
+    my @discNo = map { $_->{discNo} || 1 } @trackArray;
+    my @uniqDiscNo = uniq sort { $a <=> $b } @discNo;
+    return scalar @uniqDiscNo > 1;
 }
 
 1;
