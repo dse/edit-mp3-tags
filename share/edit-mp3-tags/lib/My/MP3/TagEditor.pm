@@ -12,6 +12,7 @@ use File::Which;
 use List::Util qw(max min uniq all none);
 use File::Basename qw(dirname basename);
 use POSIX qw(floor);
+use Sort::Naturally qw(nsort ncmp);
 
 use Moo;
 
@@ -26,6 +27,7 @@ has tempname               => (is => 'rw');
 has tracksByFilename       => (is => 'rw', default => sub { return {}; });
 has tracks                 => (is => 'rw', default => sub { return []; });
 has verbose                => (is => 'rw', default => 0);
+has forceFixTrackNumbers   => (is => 'rw', default => 0);
 
 use lib "$ENV{HOME}/git/dse.d/music-scripts/lib";
 use My::Music::Util;
@@ -72,14 +74,19 @@ sub fixTrackNumbers {
     $self->extractDiscNumbersFromTags(@$allTracksArray);
     $self->extractTrackNumbersFromTags(@$allTracksArray);
 
+    foreach my $trackHash (@$allTracksArray) {
+        $trackHash->{oldTrack} = $trackHash->{track};
+        $trackHash->{oldDisc}  = $trackHash->{disc};
+    }
+
     foreach my $dirname (sort keys %trackArrayByDirname) {
         my $trackArray = $trackArrayByDirname{$dirname};
 
-        if (!$self->noTracksHaveTrackNumbers(@$trackArray)) {
+        if (!$self->noTracksHaveTrackNumbers(@$trackArray) || $self->forceFixTrackNumbers) {
             $self->extractTrackNumbersFromFilenames(@$trackArray);
         }
 
-        if ($self->trackNumbersAreFromMultiDiscSet(@$trackArray)) {
+        if ($self->trackNumbersAreFromMultiDiscSet(@$trackArray) || $self->forceFixTrackNumbers) {
             $self->fixMultiDiscSetTrackNumbers(@$trackArray);
         }
 
@@ -87,33 +94,68 @@ sub fixTrackNumbers {
 
         foreach my $trackHash (@$trackArray) {
             my $discNo = $trackHash->{discNo} || 1;
-            warn $discNo;
             push(@{$tracksByDiscNo{$discNo}}, $trackHash);
         }
 
         if ($self->tracksAreFromMultipleDiscs(@$trackArray)) {
+            # Make sure all tracks have disc numbers.
             foreach my $trackHash (@$trackArray) {
                 $trackHash->{discNo} ||= 1;
+            }
+
+            # Make sure all tracks have number of discs specified, if
+            # appropriate.
+            my $numberOfDiscs = scalar keys %tracksByDiscNo;
+            my $sortedDiscNumbers = join(',', sort { $a <=> $b } keys %tracksByDiscNo);
+            my $checkDiscNumbers  = join(',', 1 .. $numberOfDiscs);
+            if ($sortedDiscNumbers eq $checkDiscNumbers) {
+                foreach my $trackHash (@$trackArray) {
+                    $trackHash->{discOf} = $numberOfDiscs;
+                }
             }
         }
 
         foreach my $discNo (sort { $a <=> $b } keys %tracksByDiscNo) {
+            # Make sure all tracks for each disc have number of tracks
+            # specified, if appropriate.
             my @discTrackArray = @{$tracksByDiscNo{$discNo}};
-
-            my $sortedTrackNumbers = join(",", sort { $a <=> $b } map { $_->{trackNo} // 0 } @discTrackArray);
-            my $checkTrackNumbers  = join(",", 1 .. scalar(@discTrackArray));
+            my $numberOfTracks = scalar @discTrackArray;
+            my $sortedTrackNumbers = join(",", sort { $a <=> $b } map { $_->{trackNo} || 0 } @discTrackArray);
+            my $checkTrackNumbers  = join(",", 1 .. $numberOfTracks);
             if ($sortedTrackNumbers eq $checkTrackNumbers) {
-                @discTrackArray = sort { $a->{trackNo} <=> $b->{trackNo} } @discTrackArray;
                 foreach my $trackHash (@discTrackArray) {
-                    $trackHash->{trackOf} = scalar(@discTrackArray);
-                    $trackHash->{oldTrack} = $trackHash->{track};
-                    $trackHash->{track} = sprintf("%d/%d", $trackHash->{trackNo}, $trackHash->{trackOf});
-                }
-                if (grep { ($_->{track} // "") ne ($_->{oldTrack} // "") } @discTrackArray) {
-                    $self->modified(1);
+                    $trackHash->{trackOf} = $numberOfTracks;
                 }
             }
         }
+    }
+
+    foreach my $trackHash (@$allTracksArray) {
+        if ($trackHash->{discNo}) {
+            if ($trackHash->{discOf}) {
+                $trackHash->{disc} = sprintf('%d/%d', $trackHash->{discNo}, $trackHash->{discOf});
+            } else {
+                $trackHash->{disc} = sprintf('%d', $trackHash->{discNo});
+            }
+        } else {
+            $trackHash->{disc} = '';
+        }
+        if ($trackHash->{trackNo}) {
+            if ($trackHash->{trackOf}) {
+                $trackHash->{track} = sprintf('%d/%d', $trackHash->{trackNo}, $trackHash->{trackOf});
+            } else {
+                $trackHash->{track} = sprintf('%d', $trackHash->{trackNo});
+            }
+        } else {
+            $trackHash->{track} = '';
+        }
+        if ((($trackHash->{track} // '') ne ($trackHash->{oldTrack} // '')) || (($trackHash->{disc} // '') ne ($trackHash->{oldDisc} // ''))) {
+            $trackHash->{modified} = 1;
+        }
+    }
+
+    if (grep { $_->{modified} } @$allTracksArray) {
+        $self->modified(1);
     }
 }
 
@@ -136,7 +178,7 @@ sub findCommonPrefix {
     return unless scalar @strings;
     my $minLength = min map { length $_ } @strings;
     return if $minLength < 1;
-    my $result = 0;
+    my $result = '';
     for (my $length = 1; $length <= $minLength; $length += 1) {
         my @substrings = map { substr($_, 0, $length) } @strings;
         my @uniq = uniq sort @substrings;
@@ -219,10 +261,10 @@ sub loadTagsFromFiles {
 sub sortTracks {
     my ($self, $array) = @_;
     @$array = sort {
-        ($a->{dirname} cmp $b->{dirname}) ||
+        ncmp(lc($a->{dirname}), lc($b->{dirname})) ||
             (($a->{discNo} || 1) <=> ($b->{discNo} || 1)) ||
-            (($a->{trackNo} // 0) <=> ($b->{trackNo} // 0)) ||
-            ($a->{origIndex} <=> $b->{origIndex})
+            (($a->{trackNo} || 0) <=> ($b->{trackNo} || 0)) ||
+            ncmp(lc($a->{basename}), lc($b->{basename}))
     } @$array;
 }
 
@@ -287,12 +329,34 @@ EOF
             my $extraSpace = 2;
 
             if ($hasMultipleDirectories) {
+
+                my @artist      = uniq sort grep { defined $_ && $_ ne '' } map { $_->{artist}      } @trackArray; # keep to be on the safe side
+                my @albumArtist = uniq sort grep { defined $_ && $_ ne '' } map { $_->{albumArtist} } @trackArray;
+                my @album       = uniq sort grep { defined $_ && $_ ne '' } map { $_->{album}       } @trackArray;
+                my @year        = uniq sort grep { defined $_ && $_ ne '' } map { $_->{year}        } @trackArray;
+
+                # show
+                my $albumArtist = (scalar @albumArtist == 1) ? $albumArtist[0] : '<albumArtist>'; # keep to be on the safe side
+                my $artist      = (scalar @artist      == 1) ? $artist[0]      : '';
+                my $album       = (scalar @album       == 1) ? $album[0]       : '';
+                my $year        = (scalar @year        == 1) ? $year[0]        : '';
+
+                if (($artist // '') !~ m{\S}) {
+                    $artist = '<artist>';
+                }
+                if (($album // '') !~ m{\S}) {
+                    $album = '<album>';
+                }
+                if (($year // '') !~ m{\S}) {
+                    $year = '<year>';
+                }
+
                 print $fh "\n";
-                print $fh "[album]\n";
+                print $fh "[album $dirname]\n";
                 print $fh "#albumArtist=Various Artists\n";
-                print $fh "#artist=<artist>\n";
-                print $fh "#album=<album>\n";
-                print $fh "#year=<year>\n";
+                print $fh "#artist=$artist\n";
+                print $fh "#album=$album\n";
+                print $fh "#year=$year\n";
                 print $fh "\n";
             }
 
@@ -438,7 +502,7 @@ sub loadTagsFromTagsFile {
         push(@{$self->editedTracks}, $trackHash);
         $self->editedTracksByFilename->{$trackHash->{filename}} = $trackHash;
         if ($self->verbose >= 3) {
-            warn Dumper($trackHash);
+            say STDERR Dumper($trackHash);
         }
 
         $lastLineAlbum = 0;
@@ -523,7 +587,7 @@ sub saveTags {
         }
         $mp3->update_tags(undef, 1);
         if ($self->verbose) {
-            print("Done.\n");
+            warn("Done.\n");
         }
     }
 }
