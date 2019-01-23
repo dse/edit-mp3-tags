@@ -16,6 +16,7 @@ our $verbose = 0;
 our $dry_run = 0;
 our $force = 0;
 our $parse_filenames = 0;
+our $fix_track_numbers = 0;
 
 Getopt::Long::Configure("bundling", "gnu_compat");
 Getopt::Long::GetOptions(
@@ -23,6 +24,7 @@ Getopt::Long::GetOptions(
     "n|dry-run"         => \$dry_run,
     "f|force"           => \$force,
     "p|parse-filenames" => \$parse_filenames,
+    "t|fix-track-numbers" => \$fix_track_numbers,
     "h|help" => sub { usage(); exit(0); }
 ) or die("Type '$0 --help' for help.\n");
 
@@ -34,6 +36,7 @@ options:
   -p, --parse-filenames
   -v, --verbose
   -n, --dry-run
+  -t, --fix-track-numbers
   -f, --force
 END
 
@@ -43,6 +46,7 @@ if (scalar(@ARGV)) {
     $editor->dryRun($dry_run);
     $editor->parseFilenames($parse_filenames);
     $editor->force($force);
+    $editor->forceFixTrackNumbers($fix_track_numbers);
     $editor->run(@ARGV);
 } else {
     warn("No files specified.  Exiting.");
