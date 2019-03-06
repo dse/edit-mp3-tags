@@ -276,23 +276,7 @@ sub createTagsFileToEdit {
 
         my $hasMultipleDirectories = $self->hasMultipleDirectories;
 
-        print $fh <<"EOF" if !$hasMultipleDirectories;
-# Lines starting with '#' are ignored.
-
-# Un-comment and edit any of the following line(s) for albums.
-#albumArtist=Various Artists
-#artist=<artist>
-#album=<album>
-#year=<year>
-
-# For multi-disc sets, prefix each line with:       1/2:   (optional)
-# Then if you need to fix track numbers manually:   1/10.
-
-# Make changes, save, and exit your editor to effect your changes.
-# Blank out this file to cancel all changes.
-
-EOF
-        print $fh <<"EOF" if $hasMultipleDirectories;
+        print $fh <<"EOF";
 # Lines starting with '#' are ignored.
 
 # Un-comment and edit lines like the following for albums.
@@ -328,37 +312,34 @@ EOF
             }
             my $extraSpace = 2;
 
-            if ($hasMultipleDirectories) {
+            my @artist      = uniq sort grep { defined $_ && $_ ne '' } map { $_->{artist}      } @trackArray; # keep to be on the safe side
+            my @albumArtist = uniq sort grep { defined $_ && $_ ne '' } map { $_->{albumArtist} } @trackArray;
+            my @album       = uniq sort grep { defined $_ && $_ ne '' } map { $_->{album}       } @trackArray;
+            my @year        = uniq sort grep { defined $_ && $_ ne '' } map { $_->{year}        } @trackArray;
 
-                my @artist      = uniq sort grep { defined $_ && $_ ne '' } map { $_->{artist}      } @trackArray; # keep to be on the safe side
-                my @albumArtist = uniq sort grep { defined $_ && $_ ne '' } map { $_->{albumArtist} } @trackArray;
-                my @album       = uniq sort grep { defined $_ && $_ ne '' } map { $_->{album}       } @trackArray;
-                my @year        = uniq sort grep { defined $_ && $_ ne '' } map { $_->{year}        } @trackArray;
+            # show
+            my $albumArtist = (scalar @albumArtist == 1) ? $albumArtist[0] : '<albumArtist>'; # keep to be on the safe side
+            my $artist      = (scalar @artist      == 1) ? $artist[0]      : '';
+            my $album       = (scalar @album       == 1) ? $album[0]       : '';
+            my $year        = (scalar @year        == 1) ? $year[0]        : '';
 
-                # show
-                my $albumArtist = (scalar @albumArtist == 1) ? $albumArtist[0] : '<albumArtist>'; # keep to be on the safe side
-                my $artist      = (scalar @artist      == 1) ? $artist[0]      : '';
-                my $album       = (scalar @album       == 1) ? $album[0]       : '';
-                my $year        = (scalar @year        == 1) ? $year[0]        : '';
-
-                if (($artist // '') !~ m{\S}) {
-                    $artist = '<artist>';
-                }
-                if (($album // '') !~ m{\S}) {
-                    $album = '<album>';
-                }
-                if (($year // '') !~ m{\S}) {
-                    $year = '<year>';
-                }
-
-                print $fh "\n";
-                print $fh "[album $dirname]\n";
-                print $fh "#albumArtist=Various Artists\n";
-                print $fh "#artist=$artist\n";
-                print $fh "#album=$album\n";
-                print $fh "#year=$year\n";
-                print $fh "\n";
+            if (($artist // '') !~ m{\S}) {
+                $artist = '<artist>';
             }
+            if (($album // '') !~ m{\S}) {
+                $album = '<album>';
+            }
+            if (($year // '') !~ m{\S}) {
+                $year = '<year>';
+            }
+
+            print $fh "\n";
+            print $fh "[album $dirname]\n";
+            print $fh "#albumArtist=Various Artists\n";
+            print $fh "#artist=$artist\n";
+            print $fh "#album=$album\n";
+            print $fh "#year=$year\n";
+            print $fh "\n";
 
             foreach my $trackHash (@trackArray) {
                 printf $fh ("%7s: ",             $trackHash->{tpos} // "") if $showTpos;
@@ -696,7 +677,7 @@ sub trackNumbersAreFromMultiDiscSet {
 
     return all {
         ($_->{discNo} && $_->{discNo} > 0) ||
-        (!$_->{discNo} && $_->{trackNo} >= 100)
+        (!$_->{discNo} && $_->{trackNo} && $_->{trackNo} >= 100)
     } @trackArray;
 }
 
